@@ -1,0 +1,13 @@
+samplesheet: "config/bacteria_lr_runs.filtered.tsv"
+
+# parameters for mash
+mash:
+  sketch_size: 100000
+  min_copies: 10
+
+# parameters for genomescope
+genomescope:
+  ploidy: 1
+  kmer_size: 21
+  min_copies: 2
+  max_copies: 10000
