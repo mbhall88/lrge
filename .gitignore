@@ -1,0 +1,9 @@
+/target
+.idea/
+
+paper/results
+paper/tmp
+paper/.*/
+paper/archive
+paper/data
+paper/logs
