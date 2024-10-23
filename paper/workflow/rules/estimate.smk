@@ -26,11 +26,13 @@ rule estimate_lrge:
         size=RESULTS / "estimates/lrge-{strategy}/{dir1}/{dir2}/{dir3}/{run}/{run}.size",
     log:
         LOGS / "estimate_lrge/{strategy}/{dir1}/{dir2}/{dir3}/{run}.log",
+    group:
+        "estimate"
     benchmark:
         BENCH / "estimate/lrge-{strategy}/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     threads: 4
     resources:
-        mem="4GB",
+        mem_mb=4_000,
         runtime="15m",
     conda:
         ENVS / "lrge.yaml"
@@ -49,10 +51,12 @@ rule estimate_mash:
         size=RESULTS / "estimates/mash/{dir1}/{dir2}/{dir3}/{run}/{run}.size",
     log:
         LOGS / "estimate_mash/{dir1}/{dir2}/{dir3}/{run}.log",
+    group:
+        "estimate"
     benchmark:
         BENCH / "estimate/mash/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     resources:
-        mem="4GB",
+        mem_mb=4_000,
         runtime="15m",
     conda:
         ENVS / "mash.yaml"
@@ -80,10 +84,12 @@ rule estimate_genomescope:
         size=RESULTS / "estimates/genomescope/{dir1}/{dir2}/{dir3}/{run}/{run}.size",
     log:
         LOGS / "estimate_genomescope/{dir1}/{dir2}/{dir3}/{run}.log",
+    group:
+        "estimate"
     benchmark:
         BENCH / "estimate/genomescope/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     resources:
-        mem=lambda wildcards, attempt: f"{8* attempt}GB",
+        mem_mb=16_000,
         runtime="15m",
     conda:
         ENVS / "genomescope.yaml"
@@ -106,29 +112,10 @@ rule estimate_genomescope:
         """
 
 
-expand_methods = [s for s in methods for _ in range(len(runs))]
-
-
 rule combine_estimates:
     input:
-        estimates=expand(
-            RESULTS / "estimates/{strategy}/{dir1}/{dir2}/{dir3}/{run}/{run}.size",
-            zip,
-            strategy=expand_methods,
-            dir1=dir1s * len(expand_methods),
-            dir2=dir2s * len(expand_methods),
-            dir3=dir3s * len(expand_methods),
-            run=runs * len(expand_methods),
-        ),
-        benchmarks=expand(
-            BENCH / "estimate/{strategy}/{dir1}/{dir2}/{dir3}/{run}.bench.tsv",
-            zip,
-            strategy=expand_methods,
-            dir1=dir1s * len(expand_methods),
-            dir2=dir2s * len(expand_methods),
-            dir3=dir3s * len(expand_methods),
-            run=runs * len(expand_methods),
-        ),
+        estimates=combine_estimate_paths,
+        benchmarks=combine_benchmark_paths,
     output:
         RESULTS / "estimates/estimates.tsv",
     log:
