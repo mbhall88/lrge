@@ -14,8 +14,8 @@ this ensures that we only get summaries for 'complete' assemblies
 We convert this to a TSV file and extract the information of interest
 
 ```sh
-FIELDS="accession,organism-name,organism-tax-id,assminfo-bioproject,assminfo-biosample-accession,assminfo-name,organism-infraspecific-strain,assminfo-biosample-strain,assminfo-sequencing-tech,assmstats-total-number-of-chromosomes,assmstats-total-sequence-len,assmstats-genome-coverage,assminfo-biosample-project-name"
-dataformat tsv genome --inputfile bacteria.jsonl --fields $FIELDS > bacteria.tsv
+FIELDS="accession,organism-name,organism-tax-id,assminfo-bioproject,assminfo-biosample-accession,assminfo-name,organism-infraspecific-strain,assminfo-biosample-strain,assminfo-sequencing-tech,assmstats-total-number-of-chromosomes,assmstats-total-sequence-len,assmstats-genome-coverage,assminfo-biosample-project-name,checkm-completeness,checkm-completeness-percentile,checkm-contamination,assminfo-release-date"
+dataformat tsv genome --inputfile bacteria.jsonl --fields $FIELDS | sed 's/"//g' > bacteria.tsv
 ```
 
 We extract the assemblies where the sequencing technology is ONT or PacBio. This is a little 
@@ -23,6 +23,8 @@ hacky as the sequencing technology field is essentially free text.
 
 ```sh
 rg 'SMRT|PacBio|Sequel|sequel|Oxford|ONT|Revio|ION|Pacific|pacbio|Pacbio|OXFORD|Nanopore' bacteria.tsv > bacteria_lr.tsv
+head -n1 bacteria.tsv | cat - bacteria_lr.tsv > tmp.tsv
+mv tmp.tsv bacteria_lr.tsv
 ```
 
 See `../notebooks/notepad.ipynb` for Python code that was used to deduplicate the rows 
