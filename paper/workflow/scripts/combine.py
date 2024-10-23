@@ -25,6 +25,10 @@ rename_cols = {
     "Assembly Stats Total Number of Chromosomes": "n_chromosomes",
     "Assembly Stats Genome Coverage": "asm_coverage",
     "Instrument Platform": "platform",
+    "CheckM completeness": "checkm_completeness",
+    "CheckM contamination": "checkm_contamination",
+    "CheckM completeness percentile": "checkm_completeness_percentile",
+    "Assembly Release Date": "release_date",
 }
 samplesheet = samplesheet.rename(columns=rename_cols)
 samplesheet.index.names = ["run"]
