@@ -1,0 +1,6 @@
+name: combine
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - kingfisher=0.4

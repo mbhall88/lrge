@@ -3,26 +3,29 @@ rule download:
         fastq=temp(RESULTS / "downloads/{dir1}/{dir2}/{dir3}/{run}/{run}.fastq.gz"),
     log:
         LOGS / "download/{dir1}/{dir2}/{dir3}/{run}.log"
-    container:
-        "docker://quay.io/biocontainers/fastq-dl:2.0.4--pyhdfd78af_0"
+    # group:
+    #     "estimate"
+    conda:
+        ENVS / "download.yaml"
     resources:
-        mem="1GB",
-        runtime="12h"
+        mem_mb=6_000,
+        runtime="1h"
     shadow:
         "shallow"
     params:
         outdir=lambda wildcards, output: Path(output.fastq).parent,
-        opts="--provider sra"
+        ascp_ssh_key=config["ascp_ssh_key"],
+        opts="-m ena-ascp ena-ftp --check-md5sums -f fastq.gz --force -r {run} --debug"
     shell:
         """
         exec 2> {log}
         tmpdir=$(mktemp -d)
         trap 'rm -rf $tmpdir' EXIT
 
-        fastq-dl {params.opts} -a {run} -o "$tmpdir"
+        kingfisher get {params.opts} --output-directory "$tmpdir" --ascp-ssh-key {params.ascp_ssh_key}
 
         # Find all files matching the pattern <run>*.fastq.gz in the output directory
-        matches=$(find "$tmpdir" -type f -name "{run}*.fastq.gz")
+        matches=$(find "$tmpdir" -type f -name "*.fastq.gz")
 
         # Count how many files match the pattern
         count=$(echo "$matches" | wc -l)

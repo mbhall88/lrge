@@ -1,4 +1,5 @@
 samplesheet: "config/bacteria_lr_runs.filtered.tsv"
+ascp_ssh_key: "$HOME/.aspera/connect/etc/asperaweb_id_dsa.openssh"
 
 # parameters for mash
 mash:
