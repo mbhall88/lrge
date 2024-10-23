@@ -9,7 +9,7 @@ if [[ ! -d "$LOG_DIR" ]]; then
     exit 1
 fi
 
-MEMORY="2G"
+MEMORY="32G"
 TIME="${TIME:-1d}"
 THREADS=2
 BINDS="/data/scratch/projects/punim2009/"
