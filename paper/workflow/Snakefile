@@ -18,27 +18,26 @@ configfile: CONFIG / "config.yaml"
 
 samplesheet = pd.read_csv(config["samplesheet"], sep="\t", index_col="Run Accession")
 # for testing we use a smaller set of samples
-samplesheet = samplesheet.sample(n=2000, random_state=1)
+# samplesheet = samplesheet.sample(n=2000, random_state=1)
 
 # print(len(samplesheet.query("`Instrument Platform` == 'PACBIO_SMRT'")))
 # print(len(samplesheet.query("`Instrument Platform` == 'OXFORD_NANOPORE'")))
 
 methods = ["lrge-ava", "lrge-2set", "mash", "genomescope"]
-dir1s = []
-dir2s = []
-dir3s = []
-runs = []
+combine_estimate_paths = []
+combine_benchmark_paths = []
 
 for run in samplesheet.index:
-    runs.append(run)
     # run accession is (E|D|S)RR[0-9]{6,}
     dir1 = run[:3]  # ERR, SRR, DRR
-    dir1s.append(dir1)
     dir2 = run[3:6]  # first three digits
-    dir2s.append(dir2)
     dir3 = run[6:9]  # second three digits as accession will have a minimum of 6 digits
-    dir3s.append(dir3)
-    platform = samplesheet.loc[run, "Instrument Platform"]
+
+    for method in methods:
+        est = RESULTS / f"estimates/{method}/{dir1}/{dir2}/{dir3}/{run}/{run}.size"
+        bench = BENCH / f"estimate/{method}/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
+        combine_estimate_paths.append(est)
+        combine_benchmark_paths.append(bench)
 
 targets = set()
 targets.add(RESULTS / "estimates/estimates.tsv")
