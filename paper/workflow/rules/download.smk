@@ -3,13 +3,13 @@ rule download:
         fastq=temp(RESULTS / "downloads/{dir1}/{dir2}/{dir3}/{run}/{run}.fastq.gz"),
     log:
         LOGS / "download/{dir1}/{dir2}/{dir3}/{run}.log"
-    # group:
-    #     "estimate"
+    group:
+        "estimate"
     conda:
         ENVS / "download.yaml"
     resources:
         mem_mb=6_000,
-        runtime="1h"
+        runtime="6h"
     shadow:
         "shallow"
     params:

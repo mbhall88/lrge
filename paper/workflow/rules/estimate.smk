@@ -32,7 +32,7 @@ rule estimate_lrge:
         BENCH / "estimate/lrge-{strategy}/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     threads: 4
     resources:
-        mem_mb=4_000,
+        mem_mb=lambda wildcards, attempt: 4_000 * attempt,
         runtime="15m",
     conda:
         ENVS / "lrge.yaml"
@@ -56,7 +56,7 @@ rule estimate_mash:
     benchmark:
         BENCH / "estimate/mash/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     resources:
-        mem_mb=4_000,
+        mem_mb=lambda wildcards, attempt: 6_000 * attempt,
         runtime="15m",
     conda:
         ENVS / "mash.yaml"
@@ -89,7 +89,7 @@ rule estimate_genomescope:
     benchmark:
         BENCH / "estimate/genomescope/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     resources:
-        mem_mb=16_000,
+        mem_mb=lambda wildcards, attempt: 18_000 * attempt,
         runtime="15m",
     conda:
         ENVS / "genomescope.yaml"
