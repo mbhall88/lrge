@@ -32,7 +32,7 @@ rule estimate_lrge:
         BENCH / "estimate/lrge-{strategy}/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     threads: 4
     resources:
-        mem_mb=lambda wildcards, attempt: 4_000 * attempt,
+        mem_mb=lambda wildcards, attempt: 4_000 ** attempt,
         runtime=lambda wildcards, attempt: f"{attempt}h",
     conda:
         ENVS / "lrge.yaml"
