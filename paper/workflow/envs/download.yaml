@@ -4,3 +4,5 @@ channels:
   - bioconda
 dependencies:
   - kingfisher=0.4
+  - rasusa=2.1
+  - seqkit=2.8

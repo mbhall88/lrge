@@ -26,6 +26,7 @@ samplesheet = pd.read_csv(config["samplesheet"], sep="\t", index_col="Run Access
 methods = ["lrge-ava", "lrge-2set", "mash", "genomescope"]
 combine_estimate_paths = []
 combine_benchmark_paths = []
+combine_stats_paths = []
 
 for run in samplesheet.index:
     # run accession is (E|D|S)RR[0-9]{6,}
@@ -36,8 +37,10 @@ for run in samplesheet.index:
     for method in methods:
         est = RESULTS / f"estimates/{method}/{dir1}/{dir2}/{dir3}/{run}/{run}.size"
         bench = BENCH / f"estimate/{method}/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
+        stats = RESULTS / f"stats/{dir1}/{dir2}/{dir3}/{run}.stats.tsv"
         combine_estimate_paths.append(est)
         combine_benchmark_paths.append(bench)
+        combine_stats_paths.append(stats)
 
 targets = set()
 targets.add(RESULTS / "estimates/estimates.tsv")

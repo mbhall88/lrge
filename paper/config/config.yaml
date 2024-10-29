@@ -1,6 +1,11 @@
 samplesheet: "config/bacteria_lr_runs.filtered.tsv"
 ascp_ssh_key: "$HOME/.aspera/connect/etc/asperaweb_id_dsa.openssh"
 
+download:
+  # maximum depth of coverage for a FASTQ file - https://github.com/mbhall88/rasusa?tab=readme-ov-file#-b---bases
+  max_bases: "1G"
+  seed: 324
+
 # parameters for mash
 mash:
   sketch_size: 100000

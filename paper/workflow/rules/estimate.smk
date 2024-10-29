@@ -56,7 +56,7 @@ rule estimate_mash:
     benchmark:
         BENCH / "estimate/mash/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     resources:
-        mem_mb=lambda wildcards, attempt: 18_000 * attempt,
+        mem_mb=lambda wildcards, attempt: 30_000 * attempt,
         runtime=lambda wildcards, attempt: f"{attempt}h",
     conda:
         ENVS / "mash.yaml"
@@ -89,7 +89,7 @@ rule estimate_genomescope:
     benchmark:
         BENCH / "estimate/genomescope/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     resources:
-        mem_mb=lambda wildcards, attempt: 18_000 * attempt,
+        mem_mb=lambda wildcards, attempt: 10_000 * attempt,
         runtime=lambda wildcards, attempt: f"{attempt}h",
     conda:
         ENVS / "genomescope.yaml"
@@ -116,6 +116,7 @@ rule combine_estimates:
     input:
         estimates=combine_estimate_paths,
         benchmarks=combine_benchmark_paths,
+        stats=combine_stats_paths,
     output:
         RESULTS / "estimates/estimates.tsv",
     log:
