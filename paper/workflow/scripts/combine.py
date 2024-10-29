@@ -39,6 +39,16 @@ for p in map(Path, snakemake.input.estimates):
     method = p.parts[-6]
     estimates[(run, method)] = p
 
+stats = dict()
+keep_stats_cols = ["num_seqs", "sum_len", "avg_len", "Q2"]
+for p in map(Path, snakemake.input.stats):
+    run = p.name.split(".")[0]
+    df = pd.read_csv(p, sep="\t")
+    # remove columns not in keep_stats_cols
+    df = df.loc[:, keep_stats_cols]
+    # the stats df only has one row, extract it as a list
+    stats[run] = df.iloc[0].to_list()
+
 rows = []
 for p in map(Path, snakemake.input.benchmarks):
     run = p.name.split(".")[0]
@@ -68,6 +78,8 @@ for p in map(Path, snakemake.input.benchmarks):
     # samplesheet.loc[run, "memory_mb"] = memory
     row.extend([cpu_time, memory])
 
+    row.extend(stats[run])
+
     rows.append(row)
 
 outsheet = pd.DataFrame(
@@ -81,6 +93,10 @@ outsheet = pd.DataFrame(
         "relative_error",
         "cpu_time",
         "memory_mb",
+        "stats_num_seqs",
+        "stats_sum_len",
+        "stats_avg_len",
+        "stats_median_len",
     ],
 )
 
