@@ -1,9 +1,9 @@
 def lrge_opts(wildcards):
     opts = ""
     if wildcards.strategy == "ava":
-        opts = "-n 25000 -s rand"
+        opts = "-n 25000 -s rand -vv"
     elif wildcards.strategy == "2set":
-        opts = "-L 5000 -O 10000 -r"
+        opts = "-L 5000 -O 10000 -r -v"
     else:
         raise UnimplementedError(f"Unknown strategy: {wildcards.strategy}")
 
@@ -32,7 +32,7 @@ rule estimate_lrge:
         BENCH / "estimate/lrge-{strategy}/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     threads: 4
     resources:
-        mem_mb=lambda wildcards, attempt: (4 ** attempt) * 1_000,
+        mem_mb=lambda wildcards, attempt: (4**attempt) * 1_000,
         runtime=lambda wildcards, attempt: f"{attempt}h",
     conda:
         ENVS / "lrge.yaml"
@@ -56,7 +56,7 @@ rule estimate_mash:
     benchmark:
         BENCH / "estimate/mash/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     resources:
-        mem_mb=lambda wildcards, attempt: 30_000 * attempt,
+        mem_mb=lambda wildcards, attempt: (4**attempt) * 1_000,
         runtime=lambda wildcards, attempt: f"{attempt}h",
     conda:
         ENVS / "mash.yaml"
@@ -89,7 +89,7 @@ rule estimate_genomescope:
     benchmark:
         BENCH / "estimate/genomescope/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
     resources:
-        mem_mb=lambda wildcards, attempt: 10_000 * attempt,
+        mem_mb=lambda wildcards, attempt: (4**attempt) * 1_000,
         runtime=lambda wildcards, attempt: f"{attempt}h",
     conda:
         ENVS / "genomescope.yaml"
@@ -123,7 +123,7 @@ rule combine_estimates:
         LOGS / "combine_estimates.log",
     resources:
         mem="1GB",
-        runtime="10m",
+        runtime="30m",
     conda:
         ENVS / "combine.yaml"
     params:

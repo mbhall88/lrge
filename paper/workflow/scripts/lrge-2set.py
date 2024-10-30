@@ -329,6 +329,12 @@ def main():
         estimates.append(est)
 
     genome_size = median(estimates)
+
+    # if the genome size is infinity, take the maximum of the finite estimates
+    if genome_size == float("inf"):
+        finite_estimates = [x for x in estimates if x != float("inf")]
+        genome_size = median(finite_estimates)
+
     logger.info(f"Estimated genome size: {genome_size:,}")
     print(genome_size)
 
