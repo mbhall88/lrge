@@ -40,7 +40,7 @@ seed=${snakemake_params[seed]}
 output="${snakemake_output[fastq]}"
 
 echo "[INFO]: Downsampling to $max_bases bases" >&2
-rasusa reads -s $seed -b $max_bases -o "$output" "$full_fastq"
+rasusa reads -s $seed -b $max_bases -O u "$full_fastq" | seqkit rename -o "$output" 
 
 # get stats for the fastq file
 seqkit stats -aT "$output" > "${snakemake_output[stats]}"

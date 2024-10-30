@@ -7,6 +7,7 @@ from collections import defaultdict, Counter
 from pathlib import Path
 from statistics import median
 import shutil
+import math
 
 from loguru import logger
 import pyfastx
@@ -54,6 +55,12 @@ def arg_parser():
         "--random",
         action="store_true",
         help="Select the overlap read set at random. Default is the next n longest reads after the longest reads",
+    )
+    parser.add_argument(
+        "-I",
+        "--infinite",
+        action="store_true",
+        help="Include reads with infinite estimates in the final estimate",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     return parser.parse_args()
@@ -264,6 +271,9 @@ def main():
     )
     if len(longest_info) < num_longest:
         logger.error(f"Only {len(longest_info)} reads in the input file")
+        logger.error(
+            "This could be due to too few reads in the file, or reads with duplicate sequence IDs"
+        )
         sys.exit(1)
 
     # extract the overlap reads from the sorted fastq. They are the num_overlap_reads after the num_longest
@@ -329,10 +339,13 @@ def main():
         estimates.append(est)
 
     genome_size = median(estimates)
+    logger.debug(
+        f"Estimate when including all estimates (i.e., finite and infinite): {genome_size:,}"
+    )
 
-    # if the genome size is infinity, take the maximum of the finite estimates
-    if genome_size == float("inf"):
-        finite_estimates = [x for x in estimates if x != float("inf")]
+    # take the median of the finite estimates
+    if not args.infinite:
+        finite_estimates = [x for x in estimates if not math.isinf(x)]
         genome_size = median(finite_estimates)
 
     logger.info(f"Estimated genome size: {genome_size:,}")
