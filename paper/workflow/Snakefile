@@ -18,12 +18,13 @@ configfile: CONFIG / "config.yaml"
 
 samplesheet = pd.read_csv(config["samplesheet"], sep="\t", index_col="Run Accession")
 # for testing we use a smaller set of samples
+# samplesheet = samplesheet.loc[samplesheet.index == "SRR23471073"]
 # samplesheet = samplesheet.sample(n=2000, random_state=1)
 
 # print(len(samplesheet.query("`Instrument Platform` == 'PACBIO_SMRT'")))
 # print(len(samplesheet.query("`Instrument Platform` == 'OXFORD_NANOPORE'")))
 
-methods = ["lrge-ava", "lrge-2set", "mash", "genomescope"]
+methods = ["lrge-ava", "lrge-2set", "mash", "genomescope", "raven"]
 combine_estimate_paths = []
 combine_benchmark_paths = []
 combine_stats_paths = []

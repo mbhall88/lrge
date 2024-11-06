@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euxo pipefail
 
 exec 2> "${snakemake_log[0]}"
 
@@ -8,7 +8,7 @@ trap 'rm -rf $tmpdir' EXIT
 
 run=${snakemake_wildcards[run]}
 
-kingfisher get ${snakemake_params[opts]} --output-directory "$tmpdir" --ascp-ssh-key "${snakemake_params[ascp_ssh_key]}"
+kingfisher get -m ena-ascp ena-ftp --check-md5sums -f fastq.gz --force -r $run --debug --output-directory "$tmpdir" --ascp-ssh-key "${snakemake_params[ascp_ssh_key]}"
 
 # Find all files matching the pattern <run>*.fastq.gz in the output directory
 matches=$(find "$tmpdir" -type f -name "*.fastq.gz")
@@ -39,11 +39,11 @@ accession=${snakemake_params[asm_accession]}
 zipfile="${tmpdir}/dataset.zip"
 datasets download genome accession $accession --filename "$zipfile"
 asm="${tmpdir}/${accession}.fna"
-unzip -p ncbi_dataset.zip '*genomic.fna' > "$asm"
+unzip -p "$zipfile" '*genomic.fna' > "$asm"
 
 # map the reads to the assembly and keep only those that map
 clean_fastq="${tmpdir}/${run}.clean.fq"
-minimap2 -x ${snakemake_params[platform]} -t ${snakemake_params[threads]} "$asm" "$full_fastq" | 
+minimap2 -x ${snakemake_params[platform]} -t ${snakemake[threads]} "$asm" "$full_fastq" | 
     cut -f 1 | 
     sort -u | 
     seqkit grep -f - -o "$clean_fastq" "$full_fastq"

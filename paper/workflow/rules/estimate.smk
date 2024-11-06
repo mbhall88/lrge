@@ -111,6 +111,32 @@ rule estimate_genomescope:
             rg -o -r '$1' 'len:(\d+)') > {output.size} 2>> {log}
         """
 
+rule estimate_raven:
+    input:
+        fastq=rules.download.output.fastq,
+    output:
+        size=RESULTS / "estimates/raven/{dir1}/{dir2}/{dir3}/{run}/{run}.size",
+    log:
+        LOGS / "estimate_raven/{dir1}/{dir2}/{dir3}/{run}.log",
+    group:
+        "estimate"
+    benchmark:
+        BENCH / "estimate/raven/{dir1}/{dir2}/{dir3}/{run}.bench.tsv"
+    threads: 8
+    resources:
+        mem_mb=lambda wildcards, attempt: (30*attempt) * 1_000,
+        runtime=lambda wildcards, attempt: f"{6*attempt}h",
+    container:
+        "docker://quay.io/biocontainers/raven-assembler:1.8.3--h43eeafb_1"
+    shadow:
+        "shallow"
+    shell:
+        r"""
+        (raven -p 0 -t {threads} {input.fastq} | \
+            grep -v '^>' | \
+            tr -d '\n' | \
+            wc -c > {output.size}) 2> {log}
+        """
 
 rule combine_estimates:
     input:
