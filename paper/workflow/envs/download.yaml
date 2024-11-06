@@ -6,3 +6,5 @@ dependencies:
   - kingfisher=0.4
   - rasusa=2.1
   - seqkit=2.8
+  - minimap2=2.28
+  - ncbi-datasets-cli=16.31

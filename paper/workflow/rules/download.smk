@@ -4,12 +4,13 @@ rule download:
         stats=RESULTS / "stats/{dir1}/{dir2}/{dir3}/{run}.stats.tsv",
     log:
         LOGS / "download/{dir1}/{dir2}/{dir3}/{run}.log",
-    # group:
-    #     "estimate"
+    group:
+        "estimate"
+    threads: 4
     conda:
         ENVS / "download.yaml"
     resources:
-        mem_mb=6_000,
+        mem_mb=8_000,
         runtime="12h",
     shadow:
         "shallow"
@@ -17,6 +18,9 @@ rule download:
         ascp_ssh_key=config["ascp_ssh_key"],
         opts="-m ena-ascp ena-ftp --check-md5sums -f fastq.gz --force -r {run} --debug",
         max_bases=config["download"]["max_bases"],
+        min_bases=config["download"]["min_bases"],
         seed=config["download"]["seed"],
+        asm_accession=samplesheet.loc["{run}", "Assembly Accession"],
+        platform="map-ont" if samplesheet.loc["{run}", "Instrument Platform"] == "OXFORD_NANOPORE" else "map-pb",
     script:
         SCRIPTS / "download.sh"
