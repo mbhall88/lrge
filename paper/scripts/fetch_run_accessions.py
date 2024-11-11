@@ -1,23 +1,24 @@
-"""This script takes a TSV file that contains a list of RefSeq assembly information. 
-One of the columns is the BioSample accession for the assembly. While another is the 
-sequencing platform(s) used to generate the assembly. This script will fetch the run 
-accession(s) and sequencing platform for each BioSample accession. The output is the same 
+"""This script takes a TSV file that contains a list of RefSeq assembly information.
+One of the columns is the BioSample accession for the assembly. While another is the
+sequencing platform(s) used to generate the assembly. This script will fetch the run
+accession(s) and sequencing platform for each BioSample accession. The output is the same
 as the input, but a row for each run, meaning there will likely be multiple rows for each.
-However, if the assembly has no runs with long reads, it will be skipped and therefore 
-not included in the output. The script will also log a warning if a BioSample is expected 
+However, if the assembly has no runs with long reads, it will be skipped and therefore
+not included in the output. The script will also log a warning if a BioSample is expected
 to have PacBio or Oxford Nanopore data but none is found.
 """
 
 import argparse
-import requests
-import pandas as pd
-import sys
 import logging
+import sys
+
+import pandas as pd
+import requests
 
 asm_acc_col = "Assembly Accession"
 biosample_col = "Assembly BioSample Accession"
 tech_col = "Assembly Sequencing Tech"
-default_fields = "run_accession,instrument_platform"
+default_fields = "run_accession,instrument_platform,library_selection,library_source,library_strategy"
 
 
 def parse_args():
