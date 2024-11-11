@@ -43,7 +43,7 @@ for p in map(Path, snakemake.input.estimates):
     estimates[(run, method)] = p
 
 stats = dict()
-keep_stats_cols = ["num_seqs", "sum_len", "avg_len", "Q2"]
+keep_stats_cols = ["num_seqs", "sum_len", "avg_len", "Q2", "AvgQual"]
 for p in map(Path, snakemake.input.stats):
     run = p.name.split(".")[0]
     df = pd.read_csv(p, sep="\t")
@@ -100,6 +100,7 @@ outsheet = pd.DataFrame(
         "stats_sum_len",
         "stats_avg_len",
         "stats_median_len",
+        "avg_qual",
     ],
 )
 
