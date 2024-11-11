@@ -29,6 +29,9 @@ rename_cols = {
     "CheckM contamination": "checkm_contamination",
     "CheckM completeness percentile": "checkm_completeness_percentile",
     "Assembly Release Date": "release_date",
+    "Library Selection": "library_selection",
+    "Library Source": "library_source",
+    "Library Strategy": "library_strategy",
 }
 samplesheet = samplesheet.rename(columns=rename_cols)
 samplesheet.index.names = ["run"]
