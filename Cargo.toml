@@ -1,0 +1,23 @@
+[package]
+name = "lrge"
+description = "Genome size estimation from long read overlaps"
+version = "0.1.0"
+authors = ["Michael Hall <michael@mbh.sh>"]
+edition = "2021"
+repository = "https://github.com/mbhall88/lrge"
+homepage = "https://github.com/mbhall88/lrge"
+readme = "README.md"
+keywords = ["bioinformatics", "long-reads", "overlaps", "estimation", "genome-size"]
+categories = ["science", "command-line-utilities"]
+license-file = "LICENSE"
+exclude = ["paper/*"]
+
+[dependencies]
+clap = { version = "4.5.20", features = ["derive"] }
+
+[profile.release]
+strip = true   # https://github.com/johnthagen/min-sized-rust?tab=readme-ov-file#strip-symbols-from-binary
+
+[dev-dependencies]
+assert_cmd = "2.0.16"
+predicates = "3.1.2"
