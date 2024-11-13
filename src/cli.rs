@@ -7,14 +7,10 @@ const QUERY_NUM_READS: &str = "10000";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-pub struct Opts {
+pub struct Args {
     /// Input FASTQ file
     #[arg(name = "INPUT", value_parser = check_path_exists)]
     input: PathBuf,
-
-    /// Number of reads to use (for all-vs-all strategy)
-    #[arg(short, long = "num", value_name = "NUM", conflicts_with_all = &["target_num_reads", "query_num_reads"])]
-    num_reads: Option<usize>,
 
     /// Target number of reads to use (for two-set strategy; default)
     #[arg(short = 'T', long = "target", value_name = "TARGET", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = TARGET_NUM_READS)]
@@ -23,6 +19,9 @@ pub struct Opts {
     /// Query number of reads to use (for two-set strategy; default)
     #[arg(short = 'Q', long = "query", value_name = "QUERY", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = QUERY_NUM_READS)]
     query_num_reads: Option<usize>,
+    /// Number of reads to use (for all-vs-all strategy)
+    #[arg(short, long = "num", value_name = "NUM", conflicts_with_all = &["target_num_reads", "query_num_reads"])]
+    num_reads: Option<usize>,
 
     /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
     #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]
@@ -62,7 +61,7 @@ mod tests {
 
     #[test]
     fn cli_no_args() {
-        let opts = Opts::try_parse_from([BIN]);
+        let opts = Args::try_parse_from([BIN]);
         assert!(opts.is_err());
         assert!(opts
             .unwrap_err()
@@ -72,7 +71,7 @@ mod tests {
 
     #[test]
     fn cli_with_input() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml"]).unwrap();
+        let opts = Args::try_parse_from([BIN, "Cargo.toml"]).unwrap();
 
         assert_eq!(opts.input, PathBuf::from("Cargo.toml"));
         assert_eq!(
@@ -84,7 +83,7 @@ mod tests {
 
     #[test]
     fn cli_with_num_reads() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "--num", "100"]).unwrap();
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "--num", "100"]).unwrap();
 
         assert_eq!(opts.input, PathBuf::from("Cargo.toml"));
         assert_eq!(opts.num_reads, Some(100));
@@ -95,7 +94,7 @@ mod tests {
     #[test]
     fn cli_with_target_and_query_reads() {
         let opts =
-            Opts::try_parse_from([BIN, "Cargo.toml", "--target", "100", "--query", "200"]).unwrap();
+            Args::try_parse_from([BIN, "Cargo.toml", "--target", "100", "--query", "200"]).unwrap();
         assert_eq!(opts.input, PathBuf::from("Cargo.toml"));
         assert_eq!(opts.num_reads, None);
         assert_eq!(opts.target_num_reads, Some(100));
@@ -104,7 +103,7 @@ mod tests {
 
     #[test]
     fn cli_with_num_reads_and_target_reads_and_query_reads() {
-        let opts = Opts::try_parse_from([
+        let opts = Args::try_parse_from([
             BIN,
             "Cargo.toml",
             "--num",
@@ -123,7 +122,7 @@ mod tests {
 
     #[test]
     fn cli_with_num_reads_and_target_reads() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "--num", "100", "--target", "200"]);
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "--num", "100", "--target", "200"]);
         assert!(opts.is_err());
         assert!(opts
             .unwrap_err()
@@ -133,7 +132,7 @@ mod tests {
 
     #[test]
     fn cli_with_num_reads_and_query_reads() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "--num", "100", "--query", "200"]);
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "--num", "100", "--query", "200"]);
         assert!(opts.is_err());
         assert!(opts
             .unwrap_err()
@@ -143,14 +142,14 @@ mod tests {
 
     #[test]
     fn cli_with_target_reads_no_query_reads() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "--target", "100"]).unwrap();
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "--target", "100"]).unwrap();
         assert_eq!(opts.target_num_reads, Some(100));
         assert_eq!(opts.query_num_reads, Some(QUERY_NUM_READS.parse().unwrap()));
     }
 
     #[test]
     fn cli_with_query_reads_no_target_reads() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "--query", "100"]).unwrap();
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "--query", "100"]).unwrap();
         assert_eq!(opts.query_num_reads, Some(100));
         assert_eq!(
             opts.target_num_reads,
@@ -160,31 +159,31 @@ mod tests {
 
     #[test]
     fn cli_with_quiet() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-q"]).unwrap();
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "-q"]).unwrap();
         assert_eq!(opts.quiet, 1);
     }
 
     #[test]
     fn cli_with_verbose() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-v"]).unwrap();
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "-v"]).unwrap();
         assert_eq!(opts.verbose, 1);
     }
 
     #[test]
     fn cli_with_verbose_verbose() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-vv"]).unwrap();
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "-vv"]).unwrap();
         assert_eq!(opts.verbose, 2);
     }
 
     #[test]
     fn cli_with_verbose_verbose_verbose() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-vvv"]).unwrap();
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "-vvv"]).unwrap();
         assert_eq!(opts.verbose, 3);
     }
 
     #[test]
     fn cli_with_quiet_verbose() {
-        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-qv"]);
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "-qv"]);
         assert!(opts.is_err());
         assert!(opts
             .unwrap_err()

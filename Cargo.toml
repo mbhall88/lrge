@@ -13,6 +13,7 @@ license-file = "LICENSE"
 exclude = ["paper/*"]
 
 [dependencies]
+anyhow = "1.0.93"
 clap = { version = "4.5.20", features = ["derive"] }
 env_logger = "0.11.5"
 log = "0.4.22"
