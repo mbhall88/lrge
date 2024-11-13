@@ -23,6 +23,14 @@ pub struct Opts {
     /// Query number of reads to use (for two-set strategy; default)
     #[arg(short = 'Q', long = "query", value_name = "QUERY", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = QUERY_NUM_READS)]
     query_num_reads: Option<usize>,
+
+    /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
+    #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]
+    pub quiet: u8,
+
+    /// `-v` show debug output. `-vv` show trace output.
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    pub verbose: u8,
 }
 
 /// A utility function that allows the CLI to error if a path doesn't exist
@@ -148,5 +156,39 @@ mod tests {
             opts.target_num_reads,
             Some(TARGET_NUM_READS.parse().unwrap())
         );
+    }
+
+    #[test]
+    fn cli_with_quiet() {
+        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-q"]).unwrap();
+        assert_eq!(opts.quiet, 1);
+    }
+
+    #[test]
+    fn cli_with_verbose() {
+        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-v"]).unwrap();
+        assert_eq!(opts.verbose, 1);
+    }
+
+    #[test]
+    fn cli_with_verbose_verbose() {
+        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-vv"]).unwrap();
+        assert_eq!(opts.verbose, 2);
+    }
+
+    #[test]
+    fn cli_with_verbose_verbose_verbose() {
+        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-vvv"]).unwrap();
+        assert_eq!(opts.verbose, 3);
+    }
+
+    #[test]
+    fn cli_with_quiet_verbose() {
+        let opts = Opts::try_parse_from([BIN, "Cargo.toml", "-qv"]);
+        assert!(opts.is_err());
+        assert!(opts
+            .unwrap_err()
+            .to_string()
+            .contains("error: the argument '--quiet...' cannot be used with"));
     }
 }
