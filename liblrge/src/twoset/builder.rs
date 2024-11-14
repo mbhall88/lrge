@@ -35,8 +35,7 @@ impl Builder {
     /// Set the temporary directory for the strategy. By default, this is the `TMPDIR` environment
     /// variable.
     ///
-    /// The directory must exist and be writable. In addition, it will not be cleaned up after the
-    /// strategy is run.
+    /// The directory will not be created, nor will it be cleaned up after the strategy is run.
     ///
     /// # Examples
     ///
