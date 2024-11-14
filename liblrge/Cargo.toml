@@ -1,0 +1,16 @@
+[package]
+name = "liblrge"
+version = "0.1.0"
+documentation = "https://docs.rs/liblrge"
+description.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+license-file.workspace = true
+exclude.workspace = true
+
+[dependencies]
+log.workspace = true

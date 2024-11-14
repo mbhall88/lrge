@@ -13,15 +13,15 @@ pub struct Args {
     pub input: PathBuf,
 
     /// Target number of reads to use (for two-set strategy; default)
-    #[arg(short = 'T', long = "target", value_name = "TARGET", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = TARGET_NUM_READS)]
+    #[arg(short = 'T', long = "target", value_name = "INT", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = TARGET_NUM_READS)]
     pub target_num_reads: Option<usize>,
 
     /// Query number of reads to use (for two-set strategy; default)
-    #[arg(short = 'Q', long = "query", value_name = "QUERY", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = QUERY_NUM_READS)]
+    #[arg(short = 'Q', long = "query", value_name = "INT", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = QUERY_NUM_READS)]
     pub query_num_reads: Option<usize>,
 
     /// Number of reads to use (for all-vs-all strategy)
-    #[arg(short, long = "num", value_name = "NUM", conflicts_with_all = &["target_num_reads", "query_num_reads"])]
+    #[arg(short, long = "num", value_name = "INT", conflicts_with_all = &["target_num_reads", "query_num_reads"])]
     pub num_reads: Option<usize>,
 
     /// Sequencing platform of the reads
@@ -35,6 +35,10 @@ pub struct Args {
     /// Temporary directory for storing intermediate files
     #[arg(short = 'D', long, value_name = "DIR")]
     pub temp_dir: Option<PathBuf>,
+
+    /// Random seed to use - making the estimate repeatable
+    #[clap(short = 's', long = "seed", value_name = "INT")]
+    pub seed: Option<u64>,
 
     /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
     #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]
