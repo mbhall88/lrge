@@ -38,7 +38,7 @@ impl TwoSetStrategy {
 }
 
 impl Estimate for TwoSetStrategy {
-    fn generate_estimates(&self) -> Vec<(&[u8], f32)> {
+    fn generate_estimates(&self) -> Vec<f32> {
         todo!()
     }
 }
