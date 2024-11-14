@@ -10,18 +10,31 @@ const QUERY_NUM_READS: &str = "10000";
 pub struct Args {
     /// Input FASTQ file
     #[arg(name = "INPUT", value_parser = check_path_exists)]
-    input: PathBuf,
+    pub input: PathBuf,
 
     /// Target number of reads to use (for two-set strategy; default)
     #[arg(short = 'T', long = "target", value_name = "TARGET", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = TARGET_NUM_READS)]
-    target_num_reads: Option<usize>,
+    pub target_num_reads: Option<usize>,
 
     /// Query number of reads to use (for two-set strategy; default)
     #[arg(short = 'Q', long = "query", value_name = "QUERY", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = QUERY_NUM_READS)]
-    query_num_reads: Option<usize>,
+    pub query_num_reads: Option<usize>,
+
     /// Number of reads to use (for all-vs-all strategy)
     #[arg(short, long = "num", value_name = "NUM", conflicts_with_all = &["target_num_reads", "query_num_reads"])]
-    num_reads: Option<usize>,
+    pub num_reads: Option<usize>,
+
+    /// Sequencing platform of the reads
+    #[arg(short = 'P', long, value_name = "PLATFORM", value_parser = ["ont", "pb"], default_value = "ont")]
+    pub platform: String,
+
+    /// Don't clean up temporary files
+    #[arg(short = 'C', long)]
+    pub keep_temp: bool,
+
+    /// Temporary directory for storing intermediate files
+    #[arg(short = 'D', long, value_name = "DIR")]
+    pub temp_dir: Option<PathBuf>,
 
     /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
     #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]

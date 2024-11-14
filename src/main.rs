@@ -1,10 +1,10 @@
+use crate::utils::create_temp_dir;
 use anyhow::Result;
 use clap::Parser;
-use log::{debug, info, LevelFilter, trace};
+use log::{debug, info, trace, LevelFilter};
 
 mod cli;
-mod ava;
-mod twoset;
+mod utils;
 
 fn setup_logging(quiet: u8, verbose: u8) {
     let sum = (verbose - quiet) as i16;
@@ -29,13 +29,23 @@ fn main() -> Result<()> {
     setup_logging(args.quiet, args.verbose);
     debug!("{:?}", args);
 
-    let estimates: Vec<(&[u8], f32)> = if let Some(num) = args.num_reads {
+    let tmpdir = create_temp_dir(args.temp_dir.as_ref(), args.keep_temp)?;
+    if args.keep_temp {
+        info!("Created temporary directory at {:?}", tmpdir.path());
+    } else {
+        debug!("Created temporary directory at {:?}", tmpdir.path());
+    }
+
+    let estimates: Vec<(&[u8], f32)> = Vec::new();
+    if let Some(num) = args.num_reads {
         info!("Running with all-vs-all strategy with {} reads", num);
-        ava_strategy(args.input, num)?
     } else if let (Some(target_num_reads), Some(query_num_reads)) =
         (args.target_num_reads, args.query_num_reads)
     {
-        twoset_strategy(args.input, target_num_reads, query_num_reads)?
+        info!(
+            "Running with two-set strategy with {} target reads and {} query reads",
+            target_num_reads, query_num_reads
+        );
     } else {
         unreachable!("No strategy could be determined. Please raise an issue at <https://github.com/mbhall88/lrge/issues>")
     };
@@ -46,8 +56,7 @@ fn main() -> Result<()> {
         }
     }
 
-    todo!("Determine the median of the estimates, depending on whether infinite estimates are to be included");
-    let estimate = 0;
-    println!("{}", estimate);
+    // todo!("Determine the median of the estimates, depending on whether infinite estimates are to be included");
+
     Ok(())
 }
