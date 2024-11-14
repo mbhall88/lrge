@@ -55,3 +55,57 @@ pub mod twoset;
 
 pub use self::estimate::Estimate;
 pub use self::twoset::TwoSetStrategy;
+use log::debug;
+use rand::prelude::SliceRandom;
+use rand::{random, SeedableRng};
+
+/// Returns a vector of indices for the number of elements `n`, but shuffled.
+///
+/// If a `seed` is provided, the shuffle will be deterministic.
+pub(crate) fn shuffled_indices(n: u32, seed: Option<u64>) -> Vec<u32> {
+    let mut indices: Vec<u32> = (0..n).collect();
+
+    let mut rng = match seed {
+        Some(s) => rand_pcg::Pcg64::seed_from_u64(s),
+        None => {
+            let seed = random();
+            debug!("Using seed: {}", seed);
+            rand_pcg::Pcg64::seed_from_u64(seed)
+        }
+    };
+
+    indices.shuffle(&mut rng);
+    indices
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shuffled_indices() {
+        let n = 3;
+        let mut num_times_shuffled = 0;
+        let iterations = 100;
+        for _ in 0..iterations {
+            let idxs = shuffled_indices(n, None);
+            if idxs != vec![0, 1, 2] {
+                num_times_shuffled += 1;
+            }
+        }
+        // chances of shuffling the same way - i.e., [0, 1, 2] - 100 times in a row is 3.054936363499605e-151
+        assert!(num_times_shuffled > 0 && num_times_shuffled < iterations)
+    }
+
+    #[test]
+    fn test_shuffled_indices_with_seed() {
+        let n = 4;
+        let seed = 42;
+        let indices = shuffled_indices(n, Some(seed));
+
+        for _ in 0..100 {
+            let new_indices = shuffled_indices(n, Some(seed));
+            assert_eq!(indices, new_indices);
+        }
+    }
+}

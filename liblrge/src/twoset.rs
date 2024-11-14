@@ -2,7 +2,8 @@
 mod builder;
 
 pub use self::builder::Builder;
-use crate::Estimate;
+use crate::{io, Estimate, shuffled_indices};
+use log::debug;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 5000;
@@ -34,6 +35,27 @@ impl TwoSetStrategy {
         let builder = Builder::default();
 
         builder.build(input)
+    }
+
+    fn split_fastq(&self) -> std::io::Result<(PathBuf, PathBuf)> {
+        debug!("Counting records in FASTQ file...");
+        let num_reads = {
+            let mut reader = io::open_file(&self.input)?;
+            io::count_fastq_records(&mut reader)?
+        };
+        debug!("Found {} reads in FASTQ file", num_reads);
+
+        if num_reads > u32::MAX as usize {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Number of reads exceeds maximum supported value of {}",
+                    u32::MAX
+                ),
+            ));
+        }
+        let mut indices = shuffled_indices(num_reads as u32, self.seed);
+        todo!("Split the indices into target and query sizes")
     }
 }
 

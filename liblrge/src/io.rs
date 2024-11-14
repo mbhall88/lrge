@@ -3,14 +3,15 @@ use std::io;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
-#[cfg(feature = "zstd")]
-use zstd::stream::read::Decoder as ZstdDecoder;
 #[cfg(feature = "bzip2")]
 use bzip2::bufread::BzDecoder;
 #[cfg(feature = "gzip")]
 use flate2::bufread::GzDecoder;
 #[cfg(feature = "xz")]
 use liblzma::read::XzDecoder;
+use needletail::parse_fastx_reader;
+#[cfg(feature = "zstd")]
+use zstd::stream::read::Decoder as ZstdDecoder;
 
 /// The compression format of a file.
 #[derive(Debug, PartialEq, Copy, Clone, Default)]
@@ -52,11 +53,11 @@ fn detect_compression_format<R: Read + Seek>(reader: &mut R) -> io::Result<Compr
 /// Opens a file and returns a reader. Supports gzip and zstd compression if the corresponding
 /// feature is enabled. If the file is not compressed, a regular file reader is returned. If the
 /// file is compressed with an unsupported format, an error is returned.
-pub(crate) fn open_file<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read>> {
+pub(crate) fn open_file<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read + Send>> {
     let mut buf = File::open(&path).map(BufReader::new)?;
     let compression_format = detect_compression_format(&mut buf)?;
 
-    let reader: Box<dyn Read> = match compression_format {
+    let reader: Box<dyn Read + Send> = match compression_format {
         #[cfg(feature = "gzip")]
         CompressionFormat::Gzip => Box::new(GzDecoder::new(buf)),
 
@@ -73,6 +74,20 @@ pub(crate) fn open_file<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read>> {
     };
 
     Ok(reader)
+}
+
+pub(crate) fn count_fastq_records<R: Read + Send>(reader: R) -> io::Result<usize> {
+    let mut count = 0;
+
+    let mut fastx_reader =
+        parse_fastx_reader(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    while let Some(r) = fastx_reader.next() {
+        let _ = r.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        count += 1;
+    }
+
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -170,5 +185,29 @@ mod tests {
 
         // confirm that the reader is still at the original position
         assert_eq!(reader.position(), original_position);
+    }
+
+    #[test]
+    fn test_count_fastq_records() {
+        let data = b"@SEQ_ID\nGATTA\n+\n!!!!!\n@SEQ_ID2\nGATTA\n+\n!!!!!\n";
+        let reader = Cursor::new(data);
+        let count = count_fastq_records(reader).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_count_fastq_records_with_empty_file() {
+        let data = b"";
+        let reader = Cursor::new(data);
+        let err = count_fastq_records(reader).unwrap_err();
+        assert!(err.to_string().contains("Is the file empty?"));
+    }
+
+    #[test]
+    fn test_count_fastq_records_with_invalid_data() {
+        let data = b"@SEQ_ID\nGATTA\n+\n!!!!\n@SEQ_ID2\nGATTA\n+\n!!!!!";
+        let reader = Cursor::new(data);
+        let err = count_fastq_records(reader).unwrap_err();
+        assert!(err.to_string().contains("but quality length is"));
     }
 }
