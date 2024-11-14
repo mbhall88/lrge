@@ -33,7 +33,7 @@ pub struct Args {
     pub keep_temp: bool,
 
     /// Temporary directory for storing intermediate files
-    #[arg(short = 'D', long, value_name = "DIR")]
+    #[arg(short = 'D', long = "temp", value_name = "DIR")]
     pub temp_dir: Option<PathBuf>,
 
     /// Random seed to use - making the estimate repeatable
@@ -134,7 +134,7 @@ mod tests {
         assert!(opts
             .unwrap_err()
             .to_string()
-            .contains("error: the argument '--num <NUM>' cannot be used with"));
+            .contains("error: the argument '--num <INT>' cannot be used with"));
     }
 
     #[test]
@@ -144,7 +144,7 @@ mod tests {
         assert!(opts
             .unwrap_err()
             .to_string()
-            .contains("error: the argument '--num <NUM>' cannot be used with"));
+            .contains("error: the argument '--num <INT>' cannot be used with"));
     }
 
     #[test]
@@ -154,7 +154,7 @@ mod tests {
         assert!(opts
             .unwrap_err()
             .to_string()
-            .contains("error: the argument '--num <NUM>' cannot be used with"));
+            .contains("error: the argument '--num <INT>' cannot be used with"));
     }
 
     #[test]

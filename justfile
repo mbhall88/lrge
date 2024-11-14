@@ -6,7 +6,7 @@ lint:
 
 # run all tests
 test:
-    cargo test -v --all-targets --no-fail-fast
+    cargo test -v --workspace --no-fail-fast
 
 # get coverage with tarpaulin
 coverage:
