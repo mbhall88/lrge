@@ -14,11 +14,13 @@ exclude.workspace = true
 
 [dependencies]
 log.workspace = true
-flate2 = { version = "1.0.34", optional = true }  # For gzip files
+flate2 = { version = "1.0.34", optional = true, package = "flate2" }  # For gzip files
 zstd = { version = "0.13.2", optional = true }   # For zstd files
 bzip2 = { version = "0.4.4", optional = true }   # For bzip2 files
-liblzma = { version = "0.3.5", optional = true } # For lzma (xz) files.
+liblzma = { version = "0.3.5", optional = true, package = "liblzma" } # For lzma (xz) files.
 
 [features]
-compression = ["flate2", "zstd", "bzip2", "liblzma"]  # Enable compression support
+compression = ["gzip", "zstd", "bzip2", "xz"]  # Enable compression support
 default = ["compression"]  # Enable compression by default
+xz = ["liblzma"]  # Alias "xz" to "liblzma" dependency
+gzip = ["flate2"]  # Alias "gzip" to "flate2" dependency
