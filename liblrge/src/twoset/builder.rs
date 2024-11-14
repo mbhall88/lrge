@@ -1,10 +1,12 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use super::TwoSetStrategy;
+use super::{TwoSetStrategy, DEFAULT_QUERY_NUM_READS, DEFAULT_TARGET_NUM_READS};
 
 /// A builder for [`TwoSetStrategy`].
 pub struct Builder {
+    target_num_reads: usize,
+    query_num_reads: usize,
     tmpdir: PathBuf,
     seed: Option<u64>,
 }
@@ -12,6 +14,8 @@ pub struct Builder {
 impl Default for Builder {
     fn default() -> Self {
         Self {
+            target_num_reads: DEFAULT_TARGET_NUM_READS,
+            query_num_reads: DEFAULT_QUERY_NUM_READS,
             tmpdir: env!("TMPDIR").into(),
             seed: None,
         }
@@ -30,6 +34,40 @@ impl Builder {
     /// ```
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the number of target reads for the strategy. By default, this is [`DEFAULT_TARGET_NUM_READS`].
+    ///
+    /// The target reads are the (generally) smaller set of reads that the query reads are
+    /// overlapped against.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use liblrge::twoset::Builder;
+    ///
+    /// let builder = Builder::new().target_num_reads(1000);
+    /// ```
+    pub fn target_num_reads(mut self, target_num_reads: usize) -> Self {
+        self.target_num_reads = target_num_reads;
+        self
+    }
+
+    /// Set the number of query reads for the strategy. By default, this is [`DEFAULT_QUERY_NUM_READS`].
+    ///
+    /// The query reads are the (generally) larger set of reads that are overlapped against the
+    /// target reads.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use liblrge::twoset::Builder;
+    ///
+    /// let builder = Builder::new().query_num_reads(1000);
+    /// ```
+    pub fn query_num_reads(mut self, query_num_reads: usize) -> Self {
+        self.query_num_reads = query_num_reads;
+        self
     }
 
     /// Set the temporary directory for the strategy. By default, this is the `TMPDIR` environment
@@ -75,12 +113,13 @@ impl Builder {
     /// ```
     /// use liblrge::twoset::Builder;
     ///
-    /// let strategy = Builder::new().seed(42).build(1000, 100);
+    /// let strategy = Builder::new().target_num_reads(1000).build("input.fastq");
     /// ```
-    pub fn build(self, target_num_reads: usize, query_num_reads: usize) -> TwoSetStrategy {
+    pub fn build<P: AsRef<Path>>(self, input: P) -> TwoSetStrategy {
         TwoSetStrategy {
-            target_num_reads,
-            query_num_reads,
+            input: input.as_ref().to_path_buf(),
+            target_num_reads: self.target_num_reads,
+            query_num_reads: self.query_num_reads,
             tmpdir: self.tmpdir,
             seed: self.seed,
         }
