@@ -8,6 +8,7 @@ pub struct Builder {
     target_num_reads: usize,
     query_num_reads: usize,
     tmpdir: PathBuf,
+    threads: usize,
     seed: Option<u64>,
 }
 
@@ -17,6 +18,7 @@ impl Default for Builder {
             target_num_reads: DEFAULT_TARGET_NUM_READS,
             query_num_reads: DEFAULT_QUERY_NUM_READS,
             tmpdir: env!("TMPDIR").into(),
+            threads: 1,
             seed: None,
         }
     }
@@ -67,6 +69,12 @@ impl Builder {
     /// ```
     pub fn query_num_reads(mut self, query_num_reads: usize) -> Self {
         self.query_num_reads = query_num_reads;
+        self
+    }
+
+    /// Set the number of threads to use with minimap2. By default, this is 1.
+    pub fn threads(mut self, threads: usize) -> Self {
+        self.threads = threads;
         self
     }
 
@@ -121,6 +129,7 @@ impl Builder {
             target_num_reads: self.target_num_reads,
             query_num_reads: self.query_num_reads,
             tmpdir: self.tmpdir,
+            threads: self.threads,
             seed: self.seed,
         }
     }

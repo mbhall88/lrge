@@ -8,25 +8,25 @@ pub trait Estimate {
     /// # Returns
     ///
     /// A `Vec<f32>` containing the generated estimates. These estimates may be finite or infinite.
-    fn generate_estimates(&self) -> Vec<f32>;
+    fn generate_estimates(&mut self) -> crate::Result<Vec<f32>>;
 
     /// Generate an estimate of the genome size, taking the median of the finite estimates.
     ///
     /// Note that this method will return `None` if there are no finite estimates.
-    fn estimate(&self) -> Option<f32> {
-        let estimates = self.generate_estimates();
+    fn estimate(&mut self) -> crate::Result<Option<f32>> {
+        let estimates = self.generate_estimates()?;
         let iter = estimates.iter().filter(|&x| x.is_finite()).copied();
-        median(iter)
+        Ok(median(iter))
     }
 
     /// Generate an estimate of the genome size, taking the median of all estimates - infinity
     /// included.
     ///
     /// Note that this method will return `None` if there are no estimates.
-    fn estimate_with_infinity(&self) -> Option<f32> {
-        let estimates = self.generate_estimates();
+    fn estimate_with_infinity(&mut self) -> crate::Result<Option<f32>> {
+        let estimates = self.generate_estimates()?;
         let iter = estimates.iter().copied();
-        median(iter)
+        Ok(median(iter))
     }
 }
 

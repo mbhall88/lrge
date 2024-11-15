@@ -9,6 +9,10 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use minimap2::{Aligner, Mapping};
+use crossbeam_channel as channel;
+use rayon::prelude::*;
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 5000;
 pub const DEFAULT_QUERY_NUM_READS: usize = 10000;
@@ -27,6 +31,8 @@ pub struct TwoSetStrategy {
     query_num_reads: usize,
     /// The directory to which all intermediate files will be written.
     tmpdir: PathBuf,
+    /// Number of threads to use with minimap2.
+    threads: usize,
     /// The (optional) seed to use for randomly selecting reads.
     seed: Option<u64>,
 }
@@ -88,6 +94,7 @@ impl TwoSetStrategy {
             LrgeError::FastqParseError(format!("Error parsing input FASTQ file: {}", e))
         })?;
 
+        debug!("Writing target and query reads to temporary files...");
         let mut target_writer = File::create(&target_file).map(BufWriter::new)?;
         let mut query_writer = File::create(&query_file).map(BufWriter::new)?;
         let mut sum_query_len = 0;
@@ -115,6 +122,9 @@ impl TwoSetStrategy {
         }
 
         let avg_query_len = sum_query_len as f32 / self.query_num_reads as f32;
+        debug!("Target reads written to: {}", target_file.display());
+        debug!("Query reads written to: {}", query_file.display());
+        debug!("Average query read length: {}", avg_query_len);
 
         Ok((target_file, query_file, avg_query_len))
     }
@@ -164,8 +174,81 @@ pub(crate) fn split_hashset_into_two<T: std::hash::Hash + Eq>(
 }
 
 impl Estimate for TwoSetStrategy {
-    fn generate_estimates(&self) -> Vec<f32> {
-        todo!()
+    fn generate_estimates(&mut self) -> crate::Result<Vec<f32>> {
+        let (target_file, query_file, avg_query_len) = self.split_fastq()?;
+
+        let aligner = AlignerWrapper::new(&target_file, self.threads)?;
+        let alignments = aligner.align_reads(&query_file)?;
+
+        for mapping in &alignments {
+            debug!("{:?}", mapping);
+        }
+
+        let estimates = vec![0.0; self.target_num_reads];
+        Ok(estimates)
+    }
+}
+
+struct AlignerWrapper {
+    aligner: Arc<Aligner>, // Shared aligner across threads
+}
+
+impl AlignerWrapper {
+    fn new(target_file: &Path, threads: usize) -> Result<Self, LrgeError> {
+        let aligner = Aligner::builder()
+            .with_index_threads(threads)
+            .ava_ont() // Configure for Oxford Nanopore reads; adjust if necessary
+            .with_index(target_file, None)
+            .unwrap();
+
+        Ok(Self {
+            aligner: Arc::new(aligner),
+        })
+    }
+
+    fn align_reads(&self, query_file: &Path) -> Result<Vec<Mapping>, LrgeError> {
+        let reader = io::open_file(query_file)
+            .map_err(|e| LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        let mut fastx_reader = parse_fastx_reader(reader)
+            .map_err(|e| LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {}", e)))?;
+
+        let (sender, receiver) = channel::bounded(100); // Bounded channel to control memory usage
+        let aligner = Arc::clone(&self.aligner); // Shared reference for the producer thread
+
+        // Producer: Read FASTQ records and send them to the channel
+        let producer = std::thread::spawn(move || {
+            while let Some(record) = fastx_reader.next() {
+                match record {
+                    Ok(rec) => {
+                        if sender.send(rec).is_err() {
+                            break; // Exit if the receiver is dropped
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading FASTQ record: {}", e);
+                        break;
+                    }
+                }
+            }
+            // Close the channel to signal that no more records will be sent
+            drop(sender);
+        });
+
+        // Consumer: Process records from the channel in parallel
+        let alignments: Vec<Mapping> = receiver
+            .into_iter()
+            .par_bridge() // Parallelize the processing
+            .flat_map(|record| {
+                let seq = record.seq();
+                // Use the shared aligner to perform alignment
+                aligner.map(&seq, false, false, None, None).unwrap()
+            })
+            .collect();
+
+        // Wait for the producer to finish
+        producer.join().unwrap();
+
+        Ok(alignments)
     }
 }
 
