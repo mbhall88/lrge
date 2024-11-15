@@ -55,27 +55,42 @@ pub mod twoset;
 
 pub use self::estimate::Estimate;
 pub use self::twoset::TwoSetStrategy;
-use log::debug;
-use rand::prelude::SliceRandom;
-use rand::{random, SeedableRng};
 
-/// Returns a vector of indices for the number of elements `n`, but shuffled.
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+use std::collections::HashSet;
+
+/// Generate a shuffled list of `k` indices from 0 to `n`.
 ///
-/// If a `seed` is provided, the shuffle will be deterministic.
-pub(crate) fn shuffled_indices(n: u32, seed: Option<u64>) -> Vec<u32> {
-    let mut indices: Vec<u32> = (0..n).collect();
-
+/// # Arguments
+///
+/// * `k`: The number of indices to generate.
+/// * `n`: The maximum value for the range (exclusive).
+/// * `seed`: An optional seed for the random number generator.
+pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> HashSet<u32> {
+    // Initialize RNG, using the seed if provided
     let mut rng = match seed {
-        Some(s) => rand_pcg::Pcg64::seed_from_u64(s),
-        None => {
-            let seed = random();
-            debug!("Using seed: {}", seed);
-            rand_pcg::Pcg64::seed_from_u64(seed)
-        }
+        Some(seed_value) => StdRng::seed_from_u64(seed_value), // Seeded RNG
+        None => StdRng::from_entropy(),                        // Default RNG
     };
 
-    indices.shuffle(&mut rng);
-    indices
+    let mut set = HashSet::with_capacity(k);
+
+    // Check for impossible conditions
+    if k > n as usize {
+        panic!(
+            "Cannot generate {} unique values from a range of 0 to {}",
+            k, n
+        );
+    }
+
+    // Generate unique random numbers until we have `k` values
+    while set.len() < k {
+        let num = rng.gen_range(0..n);
+        set.insert(num);
+    }
+
+    set
 }
 
 #[cfg(test)]
@@ -83,29 +98,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_shuffled_indices() {
-        let n = 3;
-        let mut num_times_shuffled = 0;
-        let iterations = 100;
-        for _ in 0..iterations {
-            let idxs = shuffled_indices(n, None);
-            if idxs != vec![0, 1, 2] {
-                num_times_shuffled += 1;
-            }
-        }
-        // chances of shuffling the same way - i.e., [0, 1, 2] - 100 times in a row is 3.054936363499605e-151
-        assert!(num_times_shuffled > 0 && num_times_shuffled < iterations)
+    fn test_unique_random_set_basic_functionality() {
+        let k = 5;
+        let n = 100;
+        let result = unique_random_set(k, n, None);
+
+        // Check that result has exactly k elements
+        assert_eq!(result.len(), k);
+
+        // Check that all elements are within the range 0 to n-1
+        assert!(result.iter().all(|&x| x < n));
     }
 
     #[test]
-    fn test_shuffled_indices_with_seed() {
-        let n = 4;
-        let seed = 42;
-        let indices = shuffled_indices(n, Some(seed));
+    fn test_unique_random_set_with_seed() {
+        let k = 5;
+        let n = 1000000;
+        let seed = Some(42);
 
-        for _ in 0..100 {
-            let new_indices = shuffled_indices(n, Some(seed));
-            assert_eq!(indices, new_indices);
-        }
+        // Generate two sets with the same seed
+        let result1 = unique_random_set(k, n, seed);
+        let result2 = unique_random_set(k, n, seed);
+
+        // They should be the same due to the same seed
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_unique_random_set_without_seed() {
+        let k = 5;
+        let n = 10000000;
+
+        // Generate two sets without a seed
+        let result1 = unique_random_set(k, n, None);
+        let result2 = unique_random_set(k, n, None);
+
+        // They should generally be different
+        assert_ne!(result1, result2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot generate")]
+    fn test_unique_random_set_k_greater_than_n() {
+        let k = 10;
+        let n = 5;
+
+        // This should panic as k > n is impossible for unique values
+        unique_random_set(k, n, None);
     }
 }
