@@ -49,6 +49,7 @@
 //! [bzip2]: https://crates.io/crates/bzip2
 //! [magic]: https://en.wikipedia.org/wiki/Magic_number_(programming)#In_files
 // #![deny(missing_docs)]
+pub mod error;
 pub mod estimate;
 pub(crate) mod io;
 pub mod twoset;
@@ -59,6 +60,9 @@ pub use self::twoset::TwoSetStrategy;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::collections::HashSet;
+
+// Define a type alias for `Result` with `MyError` as the error type
+type Result<T> = std::result::Result<T, error::LrgeError>;
 
 /// Generate a shuffled list of `k` indices from 0 to `n`.
 ///

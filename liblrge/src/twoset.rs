@@ -2,9 +2,12 @@
 mod builder;
 
 pub use self::builder::Builder;
-use crate::{io, unique_random_set, Estimate};
+use crate::{error::LrgeError, io, unique_random_set, Estimate};
 use log::{debug, warn};
+use needletail::parse_fastx_reader;
 use std::collections::HashSet;
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 5000;
@@ -38,7 +41,7 @@ impl TwoSetStrategy {
         builder.build(input)
     }
 
-    fn split_fastq(&mut self) -> std::io::Result<(PathBuf, PathBuf)> {
+    fn split_fastq(&mut self) -> crate::Result<(PathBuf, PathBuf, f32)> {
         debug!("Counting records in FASTQ file...");
         let n_fq_reads = {
             let mut reader = io::open_file(&self.input)?;
@@ -47,25 +50,22 @@ impl TwoSetStrategy {
         debug!("Found {} reads in FASTQ file", n_fq_reads);
 
         if n_fq_reads > u32::MAX as usize {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Number of reads exceeds maximum supported value of {}",
-                    u32::MAX
-                ),
-            ));
+            let msg = format!(
+                "Number of reads in FASTQ file ({}) exceeds maximum allowed value ({})",
+                n_fq_reads,
+                u32::MAX
+            );
+            return Err(LrgeError::TooManyReadsError(msg));
         }
 
         let mut n_req_reads = self.target_num_reads + self.query_num_reads;
 
         if n_fq_reads <= self.target_num_reads {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Number of reads in FASTQ file ({}) is <= target number of reads ({})",
-                    n_fq_reads, self.target_num_reads
-                ),
-            ));
+            let msg = format!(
+                "Number of reads in FASTQ file ({}) is <= target number of reads ({})",
+                n_fq_reads, self.target_num_reads
+            );
+            return Err(LrgeError::TooFewReadsError(msg));
         } else if n_fq_reads < n_req_reads {
             warn!(
                 "Number of reads in FASTQ file ({}) is less than the sum of target and query reads ({})",
@@ -73,13 +73,50 @@ impl TwoSetStrategy {
             );
             self.query_num_reads = n_fq_reads - self.target_num_reads;
             n_req_reads = n_fq_reads;
-            warn!("Using {} query reads instead", self.query_num_reads);
+            warn!("Using {} query reads", self.query_num_reads);
         }
 
         let indices = unique_random_set(n_req_reads, n_fq_reads as u32, self.seed);
-        let (target_indices, query_indices) =
+        let (mut target_indices, mut query_indices) =
             split_hashset_into_two(indices, self.target_num_reads);
-        todo!("Split the indices into target and query sizes")
+
+        let target_file = self.tmpdir.join("target.fastq");
+        let query_file = self.tmpdir.join("query.fastq");
+
+        let reader = io::open_file(&self.input)?;
+        let mut fastx_reader = parse_fastx_reader(reader).map_err(|e| {
+            LrgeError::FastqParseError(format!("Error parsing input FASTQ file: {}", e))
+        })?;
+
+        let mut target_writer = File::create(&target_file).map(BufWriter::new)?;
+        let mut query_writer = File::create(&query_file).map(BufWriter::new)?;
+        let mut sum_query_len = 0;
+        let mut idx: u32 = 0;
+        while let Some(r) = fastx_reader.next() {
+            // we can unwrap here because we know the file is valid from when we counted the records
+            let record = r.unwrap();
+
+            if target_indices.remove(&idx) {
+                record.write(&mut target_writer, None).map_err(|e| {
+                    LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
+                })?;
+            } else if query_indices.remove(&idx) {
+                record.write(&mut query_writer, None).map_err(|e| {
+                    LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
+                })?;
+                sum_query_len += record.num_bases();
+            }
+
+            if target_indices.is_empty() && query_indices.is_empty() {
+                break;
+            }
+
+            idx += 1;
+        }
+
+        let avg_query_len = sum_query_len as f32 / self.query_num_reads as f32;
+
+        Ok((target_file, query_file, avg_query_len))
     }
 }
 
