@@ -52,6 +52,7 @@
 pub mod error;
 pub mod estimate;
 pub(crate) mod io;
+pub(crate) mod minimap2;
 pub mod twoset;
 
 pub use self::estimate::Estimate;

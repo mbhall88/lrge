@@ -3,16 +3,16 @@ mod builder;
 
 pub use self::builder::Builder;
 use crate::io::FastqRecordExt;
-use crate::{error::LrgeError, io, unique_random_set, Estimate};
+use crate::minimap2::{Aligner, Mapping};
+use crate::{error::LrgeError, io, minimap2, unique_random_set, Estimate};
 use crossbeam_channel as channel;
 use log::{debug, warn};
-use minimap2::{Aligner, Mapping};
 use needletail::{parse_fastx_file, parse_fastx_reader};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
-use std::num::{NonZeroI32};
+use std::num::NonZeroI32;
 use std::ops::BitAnd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -221,16 +221,11 @@ struct AlignerWrapper {
 impl AlignerWrapper {
     fn new(target_file: &Path, threads: usize) -> Result<Self, LrgeError> {
         let mut aligner = Aligner::builder()
-            .ava_ont()
+            .preset(minimap2::AVA_ONT)
+            .dual(true)
             .with_index_threads(threads)
             .with_index(target_file, None)
             .unwrap();
-
-        // todo test this out
-        // Set the `--dual=yes` flag. to do this, we need to clear the bit corresponding to
-        // MM_F_NO_DUAL (0x002) in the `mapopt` field of the aligner.
-        // this executes following https://github.com/lh3/minimap2/blob/618d33515e5853c4576d5a3d126fdcda28f0e8a4/main.c#L120
-        aligner.mapopt.flag &= !0x002;
 
         Ok(Self {
             aligner: Arc::new(aligner),
@@ -285,9 +280,7 @@ impl AlignerWrapper {
                     qname.push(0);
                 }
                 // Use the shared aligner to perform alignment
-                aligner
-                    .map(&seq, false, false, None, None, Some(&rid))
-                    .unwrap()
+                aligner.map(&seq, Some(&rid)).unwrap()
             })
             .collect();
 
