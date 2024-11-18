@@ -71,16 +71,13 @@ type Result<T> = std::result::Result<T, error::LrgeError>;
 /// * `k`: The number of indices to generate.
 /// * `n`: The maximum value for the range (exclusive).
 /// * `seed`: An optional seed for the random number generator.
-pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> HashSet<u32> {
+pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> Vec<u32> {
     // Initialize RNG, using the seed if provided
     let mut rng = match seed {
-        Some(seed_value) => StdRng::seed_from_u64(seed_value), // Seeded RNG
-        None => StdRng::from_entropy(),                        // Default RNG
+        Some(seed_value) => StdRng::seed_from_u64(seed_value),
+        None => StdRng::from_entropy(),
     };
 
-    let mut set = HashSet::with_capacity(k);
-
-    // Check for impossible conditions
     if k > n as usize {
         panic!(
             "Cannot generate {} unique values from a range of 0 to {}",
@@ -88,13 +85,10 @@ pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> HashSet<
         );
     }
 
-    // Generate unique random numbers until we have `k` values
-    while set.len() < k {
-        let num = rng.gen_range(0..n);
-        set.insert(num);
-    }
-
-    set
+    rand::seq::index::sample(&mut rng, n as usize, k)
+        .into_iter()
+        .map(|x| x as u32)
+        .collect()
 }
 
 #[cfg(test)]
@@ -105,13 +99,19 @@ mod tests {
     fn test_unique_random_set_basic_functionality() {
         let k = 5;
         let n = 100;
-        let result = unique_random_set(k, n, None);
 
-        // Check that result has exactly k elements
-        assert_eq!(result.len(), k);
+        for _ in 0..1000 {
+            let result = unique_random_set(k, n, None);
 
-        // Check that all elements are within the range 0 to n-1
-        assert!(result.iter().all(|&x| x < n));
+            // Check that result has exactly k elements
+            assert_eq!(result.len(), k);
+
+            // Check that all elements are within the range 0 to n-1
+            assert!(result.iter().all(|&x| x < n));
+
+            // check that all elements are unique
+            assert_eq!(result.len(), result.iter().collect::<HashSet<_>>().len());
+        }
     }
 
     #[test]

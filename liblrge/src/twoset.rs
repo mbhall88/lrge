@@ -2,17 +2,20 @@
 mod builder;
 
 pub use self::builder::Builder;
+use crate::io::FastqRecordExt;
 use crate::{error::LrgeError, io, unique_random_set, Estimate};
+use crossbeam_channel as channel;
 use log::{debug, warn};
-use needletail::parse_fastx_reader;
+use minimap2::{Aligner, Mapping};
+use needletail::{parse_fastx_file, parse_fastx_reader};
+use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
+use std::num::{NonZeroI32};
+use std::ops::BitAnd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use minimap2::{Aligner, Mapping};
-use crossbeam_channel as channel;
-use rayon::prelude::*;
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 5000;
 pub const DEFAULT_QUERY_NUM_READS: usize = 10000;
@@ -84,7 +87,7 @@ impl TwoSetStrategy {
 
         let indices = unique_random_set(n_req_reads, n_fq_reads as u32, self.seed);
         let (mut target_indices, mut query_indices) =
-            split_hashset_into_two(indices, self.target_num_reads);
+            split_into_hashsets(indices, self.target_num_reads);
 
         let target_file = self.tmpdir.join("target.fastq");
         let query_file = self.tmpdir.join("query.fastq");
@@ -154,34 +157,56 @@ impl TwoSetStrategy {
 ///
 /// This function will panic if `size_first` is larger than `original.len()`.
 ///
-pub(crate) fn split_hashset_into_two<T: std::hash::Hash + Eq>(
-    mut original: HashSet<T>,
+pub(crate) fn split_into_hashsets<T: std::hash::Hash + Eq>(
+    mut original: Vec<T>,
     size_first: usize,
 ) -> (HashSet<T>, HashSet<T>) {
-    let mut set1 = HashSet::with_capacity(size_first);
-    let mut set2 = HashSet::with_capacity(original.len().saturating_sub(size_first));
+    let mut first_set = HashSet::with_capacity(size_first);
+    let mut second_set = HashSet::with_capacity(original.len().saturating_sub(size_first));
 
-    // Drain items from `original`, moving items into `set1` until it reaches the desired size
-    for item in original.drain() {
-        if set1.len() < size_first {
-            set1.insert(item);
-        } else {
-            set2.insert(item);
+    // Fill the first set
+    for _ in 0..size_first.min(original.len()) {
+        if let Some(element) = original.pop() {
+            first_set.insert(element);
         }
     }
 
-    (set1, set2)
+    // Fill the second set with the remaining elements
+    while let Some(element) = original.pop() {
+        second_set.insert(element);
+    }
+
+    (first_set, second_set)
 }
 
 impl Estimate for TwoSetStrategy {
     fn generate_estimates(&mut self) -> crate::Result<Vec<f32>> {
-        let (target_file, query_file, avg_query_len) = self.split_fastq()?;
+        let (target_file, query_file, _avg_query_len) = self.split_fastq()?;
 
         let aligner = AlignerWrapper::new(&target_file, self.threads)?;
-        let alignments = aligner.align_reads(&query_file)?;
+        let alignments = aligner.align_reads(query_file)?;
 
-        for mapping in &alignments {
-            debug!("{:?}", mapping);
+        for mapping in alignments {
+            let mut fields = Vec::new();
+            fields.push(mapping.query_name.unwrap_or("*".to_string()));
+            fields.push(
+                mapping
+                    .query_len
+                    .map(|x| x.to_string())
+                    .unwrap_or("*".to_string()),
+            );
+            fields.push(mapping.query_start.to_string());
+            fields.push(mapping.query_end.to_string());
+            fields.push(mapping.strand.to_string());
+            fields.push(mapping.target_name.unwrap_or("*".to_string()));
+            fields.push(mapping.target_len.to_string());
+            fields.push(mapping.target_start.to_string());
+            fields.push(mapping.target_end.to_string());
+            fields.push(mapping.match_len.to_string());
+            fields.push(mapping.block_len.to_string());
+            fields.push(mapping.mapq.to_string());
+            let row = fields.join("\t");
+            println!("{}", row);
         }
 
         let estimates = vec![0.0; self.target_num_reads];
@@ -195,32 +220,41 @@ struct AlignerWrapper {
 
 impl AlignerWrapper {
     fn new(target_file: &Path, threads: usize) -> Result<Self, LrgeError> {
-        let aligner = Aligner::builder()
+        let mut aligner = Aligner::builder()
+            .ava_ont()
             .with_index_threads(threads)
-            .ava_ont() // Configure for Oxford Nanopore reads; adjust if necessary
             .with_index(target_file, None)
             .unwrap();
+
+        // todo test this out
+        // Set the `--dual=yes` flag. to do this, we need to clear the bit corresponding to
+        // MM_F_NO_DUAL (0x002) in the `mapopt` field of the aligner.
+        // this executes following https://github.com/lh3/minimap2/blob/618d33515e5853c4576d5a3d126fdcda28f0e8a4/main.c#L120
+        aligner.mapopt.flag &= !0x002;
 
         Ok(Self {
             aligner: Arc::new(aligner),
         })
     }
 
-    fn align_reads(&self, query_file: &Path) -> Result<Vec<Mapping>, LrgeError> {
-        let reader = io::open_file(query_file)
-            .map_err(|e| LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-        let mut fastx_reader = parse_fastx_reader(reader)
-            .map_err(|e| LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {}", e)))?;
-
-        let (sender, receiver) = channel::bounded(100); // Bounded channel to control memory usage
+    fn align_reads(&self, query_file: PathBuf) -> Result<Vec<Mapping>, LrgeError> {
+        let (sender, receiver) = channel::bounded(1000); // Bounded channel to control memory usage
         let aligner = Arc::clone(&self.aligner); // Shared reference for the producer thread
 
         // Producer: Read FASTQ records and send them to the channel
-        let producer = std::thread::spawn(move || {
+        let producer = std::thread::spawn(move || -> Result<(), LrgeError> {
+            let mut fastx_reader = parse_fastx_file(query_file).map_err(|e| {
+                LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {}", e))
+            })?;
+
             while let Some(record) = fastx_reader.next() {
                 match record {
                     Ok(rec) => {
-                        if sender.send(rec).is_err() {
+                        let msg = io::Message::Data((
+                            rec.read_id().to_owned(),
+                            Vec::from(rec.seq().to_owned()),
+                        ));
+                        if sender.send(msg).is_err() {
                             break; // Exit if the receiver is dropped
                         }
                     }
@@ -230,8 +264,10 @@ impl AlignerWrapper {
                     }
                 }
             }
+            // sender.send(io::Message::End).unwrap();
             // Close the channel to signal that no more records will be sent
             drop(sender);
+            Ok(())
         });
 
         // Consumer: Process records from the channel in parallel
@@ -239,9 +275,19 @@ impl AlignerWrapper {
             .into_iter()
             .par_bridge() // Parallelize the processing
             .flat_map(|record| {
-                let seq = record.seq();
+                let (rid, seq) = match record {
+                    io::Message::Data(data) => data,
+                    io::Message::End => unimplemented!("End message not expected here"),
+                };
+                debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
+                let mut qname = rid.to_owned();
+                if !(qname.last() == Some(&0)) {
+                    qname.push(0);
+                }
                 // Use the shared aligner to perform alignment
-                aligner.map(&seq, false, false, None, None).unwrap()
+                aligner
+                    .map(&seq, false, false, None, None, Some(&rid))
+                    .unwrap()
             })
             .collect();
 
@@ -259,9 +305,9 @@ mod tests {
 
     #[test]
     fn test_basic_split() {
-        let original: HashSet<_> = vec![1, 2, 3, 4, 5].into_iter().collect();
+        let original = vec![1, 2, 3, 4, 5];
 
-        let (set1, set2) = split_hashset_into_two(original, 3);
+        let (set1, set2) = split_into_hashsets(original, 3);
 
         assert_eq!(set1.len(), 3);
         assert_eq!(set2.len(), 2);
@@ -269,9 +315,9 @@ mod tests {
 
     #[test]
     fn test_all_elements_in_set1() {
-        let original: HashSet<_> = vec![1, 2, 3].into_iter().collect();
+        let original = vec![1, 2, 3];
 
-        let (set1, set2) = split_hashset_into_two(original, 5);
+        let (set1, set2) = split_into_hashsets(original, 5);
 
         assert_eq!(set1.len(), 3);
         assert_eq!(set2.len(), 0);
@@ -279,9 +325,9 @@ mod tests {
 
     #[test]
     fn test_all_elements_in_set2() {
-        let original: HashSet<_> = vec![1, 2, 3].into_iter().collect();
+        let original = vec![1, 2, 3];
 
-        let (set1, set2) = split_hashset_into_two(original, 0);
+        let (set1, set2) = split_into_hashsets(original, 0);
 
         assert_eq!(set1.len(), 0);
         assert_eq!(set2.len(), 3);
@@ -289,9 +335,9 @@ mod tests {
 
     #[test]
     fn test_no_elements_lost() {
-        let original: HashSet<_> = vec![1, 2, 3, 4].into_iter().collect();
+        let original = vec![1, 2, 3, 4];
 
-        let (set1, set2) = split_hashset_into_two(original.clone(), 2);
+        let (set1, set2) = split_into_hashsets(original.clone(), 2);
 
         // Verify no elements were lost
         let combined: HashSet<_> = set1.union(&set2).collect();

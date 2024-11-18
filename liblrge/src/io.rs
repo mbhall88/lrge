@@ -90,6 +90,27 @@ pub(crate) fn count_fastq_records<R: Read + Send>(reader: R) -> io::Result<usize
     Ok(count)
 }
 
+/// A message that can be sent in a channel.
+pub(crate) enum Message {
+    /// The intention is to send a read ID and a read sequence.
+    Data((Vec<u8>, Vec<u8>)),
+    /// Signal that there will be no more data.
+    End,
+}
+
+pub(crate) trait FastqRecordExt {
+    fn read_id(&self) -> &[u8];
+}
+
+impl FastqRecordExt for needletail::parser::SequenceRecord<'_> {
+    /// The needletail FastxRecord `id` method returns the whole header line, including the comment
+    /// and the read ID. This method returns only the read ID.
+    fn read_id(&self) -> &[u8] {
+        let id = self.id();
+        id.split(|&x| x == b' ').next().unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

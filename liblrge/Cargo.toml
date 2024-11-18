@@ -17,7 +17,7 @@ log.workspace = true
 needletail = { version = "0.6.0", default-features = false }
 rand = "0.8.5"
 
-minimap2 = { version = "0.1.20+minimap2.2.28", default-features = false }
+minimap2 = { version = "0.1.20+minimap2.2.28", default-features = false, path = "../../minimap2-rs" }
 crossbeam-channel = "0.5.13"
 rayon = "1.10.0"
 
