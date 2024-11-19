@@ -71,7 +71,7 @@ impl Aligner {
         aligner
     }
 
-    /// Set the preset for the aligner
+    /// Set the preset options for the aligner
     pub fn preset(mut self, preset: &[u8]) -> Self {
         let result = unsafe {
             mm_set_opt(
@@ -81,21 +81,26 @@ impl Aligner {
             )
         };
 
-        eprintln!("{:?}", self.mapopt);
-        // if the result is 0, success, if -1 then the preset is not found
-        if result == -1 {
+        if result < 0 {
             panic!("Preset not found: {:?}", String::from_utf8_lossy(preset));
         }
 
         self
     }
 
+    /// Set `--dual=yes` (`true`) or `--dual=no` (`false`). From the docs:
+    /// --dual=yes|no
+    ///  	If no, skip query-target pairs wherein the query name is lexicographically greater than the target name.
+    /// When using the TwoSet strategy, we set this to `true`, otherwise we ignore ~half of the
+    /// potential overlaps. For the AvaStrategy, we don't need to set this as the preset takes care of it.
     pub fn dual(mut self, yes: bool) -> Self {
         if yes {
             // Set the `--dual=yes` flag. to do this, we need to clear the bit corresponding to
             // MM_F_NO_DUAL (0x002) in the `mapopt` field of the aligner.
             // this executes following https://github.com/lh3/minimap2/blob/618d33515e5853c4576d5a3d126fdcda28f0e8a4/main.c#L120
             self.mapopt.flag &= !0x002;
+        } else {
+            self.mapopt.flag |= 0x002;
         }
         self
     }
@@ -137,12 +142,10 @@ impl Aligner {
             }
         };
 
-        // Confirm file exists
         if !path.as_ref().exists() {
             return Err("File does not exist");
         }
 
-        // Confirm file is not empty
         if path.as_ref().metadata().unwrap().len() == 0 {
             return Err("File is empty");
         }
@@ -187,10 +190,7 @@ impl Aligner {
     ///
     /// Parameters:
     /// seq: Sequence to align
-    /// cs: Whether to output CIGAR string
-    /// MD: Whether to output MD tag
-    /// max_frag_len: Maximum fragment length
-    /// extra_flags: Extra flags to pass to minimap2 as `Vec<u64>`
+    /// query_name: Optional (but encouraged) query name
     pub fn map(
         &self,
         seq: &[u8],
@@ -201,7 +201,6 @@ impl Aligner {
             return Err("No index");
         }
 
-        // Make sure sequence is not empty
         if seq.is_empty() {
             return Err("Sequence is empty");
         }
