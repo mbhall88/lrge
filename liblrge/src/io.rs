@@ -94,8 +94,6 @@ pub(crate) fn count_fastq_records<R: Read + Send>(reader: R) -> io::Result<usize
 pub(crate) enum Message {
     /// The intention is to send a read ID and a read sequence.
     Data((Vec<u8>, Vec<u8>)),
-    /// Signal that there will be no more data.
-    End,
 }
 
 pub(crate) trait FastqRecordExt {

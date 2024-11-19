@@ -3,7 +3,7 @@ mod builder;
 
 pub use self::builder::Builder;
 use crate::io::FastqRecordExt;
-use crate::minimap2::{Aligner, Mapping};
+use crate::minimap2::Aligner;
 use crate::{error::LrgeError, io, minimap2, unique_random_set, Estimate};
 use crossbeam_channel as channel;
 use log::{debug, warn};
@@ -12,8 +12,6 @@ use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
-use std::num::NonZeroI32;
-use std::ops::BitAnd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -184,30 +182,30 @@ impl Estimate for TwoSetStrategy {
         let (target_file, query_file, _avg_query_len) = self.split_fastq()?;
 
         let aligner = AlignerWrapper::new(&target_file, self.threads)?;
-        let alignments = aligner.align_reads(query_file)?;
+        let _alignments = aligner.align_reads(query_file, &self.tmpdir)?;
 
-        for mapping in alignments {
-            let mut fields = Vec::new();
-            fields.push(mapping.query_name.unwrap_or("*".to_string()));
-            fields.push(
-                mapping
-                    .query_len
-                    .map(|x| x.to_string())
-                    .unwrap_or("*".to_string()),
-            );
-            fields.push(mapping.query_start.to_string());
-            fields.push(mapping.query_end.to_string());
-            fields.push(mapping.strand.to_string());
-            fields.push(mapping.target_name.unwrap_or("*".to_string()));
-            fields.push(mapping.target_len.to_string());
-            fields.push(mapping.target_start.to_string());
-            fields.push(mapping.target_end.to_string());
-            fields.push(mapping.match_len.to_string());
-            fields.push(mapping.block_len.to_string());
-            fields.push(mapping.mapq.to_string());
-            let row = fields.join("\t");
-            println!("{}", row);
-        }
+        // for mapping in alignments {
+        //     let mut fields = Vec::new();
+        //     fields.push(mapping.query_name.unwrap_or(b"*".to_vec()));
+        //     fields.push(
+        //         mapping
+        //             .query_len
+        //             .map(|x| x)
+        //             .unwrap_or(b"*".to_vec()),
+        //     );
+        //     fields.push(mapping.query_start.to_string());
+        //     fields.push(mapping.query_end.to_string());
+        //     fields.push(mapping.strand.to_string());
+        //     fields.push(mapping.target_name.unwrap_or("*".to_string()));
+        //     fields.push(mapping.target_len.to_string());
+        //     fields.push(mapping.target_start.to_string());
+        //     fields.push(mapping.target_end.to_string());
+        //     fields.push(mapping.match_len.to_string());
+        //     fields.push(mapping.block_len.to_string());
+        //     fields.push(mapping.mapq.to_string());
+        //     let row = fields.join("\t");
+        //     println!("{}", row);
+        // }
 
         let estimates = vec![0.0; self.target_num_reads];
         Ok(estimates)
@@ -220,7 +218,7 @@ struct AlignerWrapper {
 
 impl AlignerWrapper {
     fn new(target_file: &Path, threads: usize) -> Result<Self, LrgeError> {
-        let mut aligner = Aligner::builder()
+        let aligner = Aligner::builder()
             .preset(minimap2::AVA_ONT)
             .dual(true)
             .with_index_threads(threads)
@@ -232,7 +230,7 @@ impl AlignerWrapper {
         })
     }
 
-    fn align_reads(&self, query_file: PathBuf) -> Result<Vec<Mapping>, LrgeError> {
+    fn align_reads(&self, query_file: PathBuf, tmpdir: &PathBuf) -> Result<PathBuf, LrgeError> {
         let (sender, receiver) = channel::bounded(1000); // Bounded channel to control memory usage
         let aligner = Arc::clone(&self.aligner); // Shared reference for the producer thread
 
@@ -254,8 +252,10 @@ impl AlignerWrapper {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Error reading FASTQ record: {}", e);
-                        break;
+                        return Err(LrgeError::FastqParseError(format!(
+                            "Error parsing query FASTQ file: {}",
+                            e
+                        )));
                     }
                 }
             }
@@ -266,28 +266,51 @@ impl AlignerWrapper {
         });
 
         // Consumer: Process records from the channel in parallel
-        let alignments: Vec<Mapping> = receiver
+        // let alignments: Vec<Mapping> = receiver
+        //     .into_iter()
+        //     .par_bridge() // Parallelize the processing
+        //     .flat_map(|record| {
+        //         let (rid, seq) = match record {
+        //             io::Message::Data(data) => data,
+        //             io::Message::End => unimplemented!("End message not expected here"),
+        //         };
+        //         debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
+        //         let mut qname = rid.to_owned();
+        //         if !(qname.last() == Some(&0)) {
+        //             qname.push(0);
+        //         }
+        //         // Use the shared aligner to perform alignment
+        //         aligner.map(&seq, Some(&rid)).unwrap()
+        //     })
+        //     .collect();
+
+        // Open the output file for writing
+        let paf_path = tmpdir.join("overlaps.paf");
+        let mut _file = File::create(&paf_path).map(BufWriter::new)?;
+
+        // Consumer: Process records from the channel in parallel
+        receiver
             .into_iter()
             .par_bridge() // Parallelize the processing
-            .flat_map(|record| {
-                let (rid, seq) = match record {
-                    io::Message::Data(data) => data,
-                    io::Message::End => unimplemented!("End message not expected here"),
-                };
+            .try_for_each(|record| -> Result<(), LrgeError> {
+                let io::Message::Data((rid, seq)) = record;
                 debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
                 let mut qname = rid.to_owned();
-                if !(qname.last() == Some(&0)) {
+                if qname.last() != Some(&0) {
                     qname.push(0);
                 }
                 // Use the shared aligner to perform alignment
-                aligner.map(&seq, Some(&rid)).unwrap()
-            })
-            .collect();
+                let _mappings = aligner.map(&seq, Some(&rid)).unwrap();
+                // for mapping in mappings {
+                //     file.write(mapping)?;
+                // }
+                Ok(())
+            })?;
 
         // Wait for the producer to finish
         producer.join().unwrap();
 
-        Ok(alignments)
+        Ok(paf_path)
     }
 }
 

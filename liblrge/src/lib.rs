@@ -59,8 +59,7 @@ pub use self::estimate::Estimate;
 pub use self::twoset::TwoSetStrategy;
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
-use std::collections::HashSet;
+use rand::SeedableRng;
 
 // Define a type alias for `Result` with `MyError` as the error type
 type Result<T> = std::result::Result<T, error::LrgeError>;
@@ -95,6 +94,7 @@ pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> Vec<u32>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn test_unique_random_set_basic_functionality() {

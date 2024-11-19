@@ -1,52 +1,18 @@
+mod mapping;
+
 use minimap2_sys::*;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::mem::MaybeUninit;
-use std::num::NonZeroI32;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+
+pub use self::mapping::Mapping;
 
 pub(crate) type MapOpt = mm_mapopt_t;
 pub(crate) type IdxOpt = mm_idxopt_t;
 pub(crate) const AVA_PB: &[u8] = b"ava-pb\0";
 pub(crate) const AVA_ONT: &[u8] = b"ava-ont\0";
-
-/// Strand enum
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
-pub enum Strand {
-    #[default]
-    Forward,
-    Reverse,
-}
-
-impl std::fmt::Display for Strand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Strand::Forward => write!(f, "+"),
-            Strand::Reverse => write!(f, "-"),
-        }
-    }
-}
-
-/// Mapping result
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Mapping {
-    // The query sequence name.
-    pub query_name: Option<String>,
-    pub query_len: Option<NonZeroI32>,
-    pub query_start: i32,
-    pub query_end: i32,
-    pub strand: Strand,
-    pub target_name: Option<String>,
-    pub target_len: i32,
-    pub target_start: i32,
-    pub target_end: i32,
-    pub match_len: i32,
-    pub block_len: i32,
-    pub mapq: u32,
-    pub is_primary: bool,
-    pub is_supplementary: bool,
-}
 
 // Thread local buffer (memory management) for minimap2
 thread_local! {
@@ -66,7 +32,7 @@ impl ThreadLocalBuffer {
         let buf = unsafe { mm_tbuf_init() };
         Self {
             buf,
-            max_uses: 1,
+            max_uses: 15,
             uses: 0,
         }
     }
@@ -203,16 +169,6 @@ impl Aligner {
         self
     }
 
-    pub fn check_opts(&self) -> Result<(), &'static str> {
-        let result = unsafe { mm_check_opt(&self.idxopt, &self.mapopt) };
-
-        if result == 0 {
-            Ok(())
-        } else {
-            Err("Invalid options")
-        }
-    }
-
     /// Set index parameters for minimap2 using builder pattern
     /// Creates the index as well with the given number of threads (set at struct creation).
     /// You must set the number of threads before calling this function.
@@ -300,7 +256,7 @@ impl Aligner {
     /// extra_flags: Extra flags to pass to minimap2 as `Vec<u64>`
     pub fn map(&self, seq: &[u8], query_name: Option<&[u8]>) -> Result<Vec<Mapping>, &'static str> {
         // Make sure index is set
-        if !self.idx.is_some() {
+        if self.idx.is_none() {
             return Err("No index");
         }
 
@@ -313,16 +269,15 @@ impl Aligner {
 
         // Number of results
         let mut n_regs: i32 = 0;
-        // let mut map_opt = self.mapopt.clone();
 
         let qname = match query_name {
             None => std::ptr::null(),
             Some(qname) => qname.as_ptr() as *const ::std::os::raw::c_char,
         };
+        let query_name = query_name.map(|q| q.to_vec()).unwrap_or(b"*".to_vec());
+        let query_len = seq.len() as i32;
 
         let mappings = BUF.with(|buf| {
-            let km = unsafe { mm_tbuf_get_km(buf.borrow_mut().get_buf()) };
-
             mm_reg = MaybeUninit::new(unsafe {
                 mm_map(
                     self.idx.unwrap() as *const mm_idx_t,
@@ -339,40 +294,49 @@ impl Aligner {
             for i in 0..n_regs {
                 unsafe {
                     let reg_ptr = (*mm_reg.as_ptr()).offset(i as isize);
-                    let const_ptr = reg_ptr as *const mm_reg1_t;
                     let reg: mm_reg1_t = *reg_ptr;
 
                     let contig: *mut ::std::os::raw::c_char =
                         (*((*(self.idx.unwrap())).seq.offset(reg.rid as isize))).name;
+                    let target_name = std::ffi::CStr::from_ptr(contig).to_bytes().to_vec();
 
-                    let is_primary = reg.parent == reg.id;
-                    let is_supplementary = reg.sam_pri() == 0;
+                    let strand = if reg.rev() == 0 { '+' } else { '-' };
+
+                    // tp:A:<CHAR> Type of aln: P/primary, S/secondary and I,i/inversion
+                    let tp = match (reg.id == reg.parent, reg.inv() != 0) {
+                        (true, true) => 'I',
+                        (true, false) => 'P',
+                        (false, true) => 'i',
+                        (false, false) => 'S',
+                    };
+                    // cm:i:<INT> which is the number of minimizers on the chain
+                    let cm = reg.cnt;
+                    // s1:i:<INT> which is the number of residues in the matching chain (chaining score)
+                    let s1 = reg.score;
+                    // dv:f:<FLOAT> approximate per-base sequence divergence
+                    let dv = reg.div;
+                    // rl:i:<INT> Length of query regions harboring repetitive seeds
+                    let rl = (*buf.borrow_mut().get_buf()).rep_len;
 
                     mappings.push(Mapping {
-                        target_name: Some(
-                            std::ffi::CStr::from_ptr(contig)
-                                .to_str()
-                                .unwrap()
-                                .to_string(),
-                        ),
+                        target_name,
                         target_len: (*((*(self.idx.unwrap())).seq.offset(reg.rid as isize))).len
                             as i32,
                         target_start: reg.rs,
                         target_end: reg.re,
-                        query_name: query_name.map(|q| String::from_utf8_lossy(q).to_string()),
-                        query_len: NonZeroI32::new(seq.len() as i32),
+                        query_name: query_name.clone(),
+                        query_len,
                         query_start: reg.qs,
                         query_end: reg.qe,
-                        strand: if reg.rev() == 0 {
-                            Strand::Forward
-                        } else {
-                            Strand::Reverse
-                        },
+                        strand,
                         match_len: reg.mlen,
                         block_len: reg.blen,
                         mapq: reg.mapq(),
-                        is_primary,
-                        is_supplementary,
+                        tp,
+                        cm,
+                        s1,
+                        dv,
+                        rl,
                     });
                     libc::free(reg.p as *mut c_void);
                 }
