@@ -104,7 +104,6 @@ where
 {
     // format the float with 4 decimal places
     let value = format!("{:.4}", value);
-    let value = f32::from_str(&value).unwrap();
     serialize_tag_with_name("dv", &value, serializer)
 }
 
@@ -123,15 +122,16 @@ where
     S: Serializer,
     T: std::fmt::Display,
 {
-    let prefix = if std::any::type_name::<T>() == "char" {
-        "A" // Special prefix for char
-    } else {
-        &*std::any::type_name::<T>()
-            .chars()
-            .next()
-            .unwrap_or_default()
-            .to_string()
+    let mut prefix = match std::any::type_name::<T>() {
+        "char" => "A",
+        "i32" => "i",
+        "f32" => "f",
+        s => s,
     };
+
+    if name == "dv" {
+        prefix = "f";
+    }
 
     let formatted = format!("{}:{}:{}", name, prefix, value);
     serializer.serialize_str(&formatted)
@@ -140,7 +140,7 @@ where
 /// Generic deserialization for fields like `cm:i:123`
 fn deserialize_tag<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where
-    T: std::str::FromStr,
+    T: FromStr,
     T::Err: std::fmt::Display,
     D: Deserializer<'de>,
 {
@@ -281,6 +281,38 @@ mod tests {
         let result = wtr.into_inner().unwrap();
         let result = String::from_utf8(result).unwrap();
         let expected = "SRR28370649.1\t4402\t40\t237\t-\tSRR28370649.7311\t5094\t41\t238\t190\t197\t0\ttp:A:S\tcm:i:59\ts1:i:190\tdv:f:0.0022\trl:i:56\n";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_serialize_mapping_dv_fill_to_decimal_places() {
+        let mapping = PafRecord {
+            query_name: b"SRR28370649.1".to_vec(),
+            query_len: 4402,
+            query_start: 40,
+            query_end: 237,
+            strand: '-',
+            target_name: b"SRR28370649.7311".to_vec(),
+            target_len: 5094,
+            target_start: 41,
+            target_end: 238,
+            match_len: 190,
+            block_len: 197,
+            mapq: 0,
+            tp: 'S',
+            cm: 59,
+            s1: 190,
+            dv: 0.004,
+            rl: 56,
+        };
+        let mut wtr = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .has_headers(false)
+            .from_writer(vec![]);
+        wtr.serialize(mapping).unwrap();
+        let result = wtr.into_inner().unwrap();
+        let result = String::from_utf8(result).unwrap();
+        let expected = "SRR28370649.1\t4402\t40\t237\t-\tSRR28370649.7311\t5094\t41\t238\t190\t197\t0\ttp:A:S\tcm:i:59\ts1:i:190\tdv:f:0.0040\trl:i:56\n";
         assert_eq!(result, expected);
     }
 }

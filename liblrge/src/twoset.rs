@@ -13,7 +13,8 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use crate::error::LrgeError::ThreadError;
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 5000;
 pub const DEFAULT_QUERY_NUM_READS: usize = 10000;
@@ -133,9 +134,9 @@ impl TwoSetStrategy {
     }
 }
 
-/// Splits a `HashSet` into two separate sets with potentially different sizes.
+/// Splits a `Vec` into two separate sets with potentially different sizes.
 ///
-/// This function consumes the original `HashSet` and divides its elements into
+/// This function consumes the original `Vec` and divides its elements into
 /// two new sets, `set1` and `set2`. The size of `set1` is specified by `size_first`,
 /// while `set2` will contain the remaining elements. If `size_first` is larger than
 /// the number of elements in `original`, all elements are placed in `set1`, and `set2`
@@ -143,7 +144,7 @@ impl TwoSetStrategy {
 ///
 /// # Arguments
 ///
-/// * `original` - The `HashSet` to be split. This set will be consumed by the function,
+/// * `original` - The `Vec` to be split. This set will be consumed by the function,
 ///                so it will no longer be accessible after the function call.
 /// * `size_first` - The number of elements to place in the first set, `set1`.
 ///
@@ -189,30 +190,9 @@ impl Estimate for TwoSetStrategy {
         };
 
         let aligner = AlignerWrapper::new(&target_file, self.threads, preset, true)?;
-        let _alignments = aligner.align_reads(query_file, &self.tmpdir)?;
+        let paf_file = aligner.align_reads(query_file, &self.tmpdir)?;
 
-        // for mapping in alignments {
-        //     let mut fields = Vec::new();
-        //     fields.push(mapping.query_name.unwrap_or(b"*".to_vec()));
-        //     fields.push(
-        //         mapping
-        //             .query_len
-        //             .map(|x| x)
-        //             .unwrap_or(b"*".to_vec()),
-        //     );
-        //     fields.push(mapping.query_start.to_string());
-        //     fields.push(mapping.query_end.to_string());
-        //     fields.push(mapping.strand.to_string());
-        //     fields.push(mapping.target_name.unwrap_or("*".to_string()));
-        //     fields.push(mapping.target_len.to_string());
-        //     fields.push(mapping.target_start.to_string());
-        //     fields.push(mapping.target_end.to_string());
-        //     fields.push(mapping.match_len.to_string());
-        //     fields.push(mapping.block_len.to_string());
-        //     fields.push(mapping.mapq.to_string());
-        //     let row = fields.join("\t");
-        //     println!("{}", row);
-        // }
+        debug!("Overlaps written to: {}", paf_file.display());
 
         let estimates = vec![0.0; self.target_num_reads];
         Ok(estimates)
@@ -221,6 +201,7 @@ impl Estimate for TwoSetStrategy {
 
 struct AlignerWrapper {
     aligner: Arc<Aligner>, // Shared aligner across threads
+    threads: usize,
 }
 
 impl AlignerWrapper {
@@ -239,6 +220,7 @@ impl AlignerWrapper {
 
         Ok(Self {
             aligner: Arc::new(aligner),
+            threads,
         })
     }
 
@@ -277,47 +259,42 @@ impl AlignerWrapper {
             Ok(())
         });
 
-        // Consumer: Process records from the channel in parallel
-        // let alignments: Vec<Mapping> = receiver
-        //     .into_iter()
-        //     .par_bridge() // Parallelize the processing
-        //     .flat_map(|record| {
-        //         let (rid, seq) = match record {
-        //             io::Message::Data(data) => data,
-        //             io::Message::End => unimplemented!("End message not expected here"),
-        //         };
-        //         debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
-        //         let mut qname = rid.to_owned();
-        //         if !(qname.last() == Some(&0)) {
-        //             qname.push(0);
-        //         }
-        //         // Use the shared aligner to perform alignment
-        //         aligner.map(&seq, Some(&rid)).unwrap()
-        //     })
-        //     .collect();
-
         // Open the output file for writing
         let paf_path = tmpdir.join("overlaps.paf");
-        let mut _file = File::create(&paf_path).map(BufWriter::new)?;
+        let mut buf = File::create(&paf_path).map(BufWriter::new)?;
+        let writer = csv::WriterBuilder::new().has_headers(false).delimiter(b'\t').from_writer(&mut buf);
+        // Wrap the writer in an Arc<Mutex> for thread-safe use
+        let writer = Arc::new(Mutex::new(writer));
+
+        // set the number of threads to use with rayon in the below code
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(self.threads).build().map_err(
+            |e| ThreadError(format!("Error setting number of threads: {}", e)),
+        )?;
 
         // Consumer: Process records from the channel in parallel
-        receiver
-            .into_iter()
-            .par_bridge() // Parallelize the processing
-            .try_for_each(|record| -> Result<(), LrgeError> {
-                let io::Message::Data((rid, seq)) = record;
-                debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
-                let mut qname = rid.to_owned();
-                if qname.last() != Some(&0) {
-                    qname.push(0);
-                }
-                // Use the shared aligner to perform alignment
-                let _mappings = aligner.map(&seq, Some(&rid)).unwrap();
-                // for mapping in mappings {
-                //     file.write(mapping)?;
-                // }
-                Ok(())
-            })?;
+        pool.install (|| -> Result<(), LrgeError> {
+            receiver
+                .into_iter()
+                .par_bridge() // Parallelize the processing
+                .try_for_each(|record| -> Result<(), LrgeError> {
+                    let io::Message::Data((rid, seq)) = record;
+                    debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
+                    let mut qname = rid.to_owned();
+                    if qname.last() != Some(&0) {
+                        qname.push(0);
+                    }
+                    // Use the shared aligner to perform alignment
+                    let mappings = aligner.map(&seq, Some(&rid)).unwrap();
+                    {
+                        let mut writer_lock = writer.lock().unwrap();
+                        for mapping in mappings {
+                            writer_lock.serialize(mapping)?;
+                        }
+                    }
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
 
         // Wait for the producer to finish
         producer.join().unwrap();

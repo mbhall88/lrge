@@ -89,8 +89,7 @@ impl Aligner {
     }
 
     /// Set `--dual=yes` (`true`) or `--dual=no` (`false`). From the docs:
-    /// --dual=yes|no
-    ///  	If no, skip query-target pairs wherein the query name is lexicographically greater than the target name.
+    /// --dual=yes|no - If no, skip query-target pairs wherein the query name is lexicographically greater than the target name.
     /// When using the TwoSet strategy, we set this to `true`, otherwise we ignore ~half of the
     /// potential overlaps. For the AvaStrategy, we don't need to set this as the preset takes care of it.
     pub fn dual(mut self, yes: bool) -> Self {

@@ -17,6 +17,12 @@ pub enum LrgeError {
 
     /// Invalid platform string.
     InvalidPlatform(String),
+
+    /// Error when setting the number of threads
+    ThreadError(String),
+
+    /// Error writing PAF file
+    PafWriteError(String),
 }
 
 impl fmt::Display for LrgeError {
@@ -27,6 +33,8 @@ impl fmt::Display for LrgeError {
             LrgeError::TooManyReadsError(msg) => write!(f, "Too many reads requested: {}", msg),
             LrgeError::TooFewReadsError(msg) => write!(f, "Too few reads requested: {}", msg),
             LrgeError::InvalidPlatform(msg) => write!(f, "Invalid platform: {}", msg),
+            LrgeError::ThreadError(msg) => write!(f, "Error setting number of threads: {}", msg),
+            LrgeError::PafWriteError(msg) => write!(f, "Error writing PAF file: {}", msg),
         }
     }
 }
@@ -37,5 +45,12 @@ impl std::error::Error for LrgeError {}
 impl From<std::io::Error> for LrgeError {
     fn from(error: std::io::Error) -> Self {
         LrgeError::IoError(error)
+    }
+}
+
+/// Converts a `csv::Error` into an [`LrgeError`].
+impl From<csv::Error> for LrgeError {
+    fn from(error: csv::Error) -> Self {
+        LrgeError::PafWriteError(error.to_string())
     }
 }
