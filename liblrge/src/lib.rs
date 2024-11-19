@@ -57,12 +57,48 @@ pub mod twoset;
 
 pub use self::estimate::Estimate;
 pub use self::twoset::TwoSetStrategy;
+use std::str::FromStr;
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 // Define a type alias for `Result` with `MyError` as the error type
 type Result<T> = std::result::Result<T, error::LrgeError>;
+
+/// The sequencing platform used to generate the reads.
+///
+/// # Examples
+///
+/// ```
+/// use std::str::FromStr;
+/// use liblrge::Platform;
+///
+/// for platform in ["pacbio", "pb"] {
+///     assert_eq!(Platform::from_str(platform).unwrap(), Platform::PacBio);
+/// }
+///
+/// for platform in ["nanopore", "ont"] {
+///     assert_eq!(Platform::from_str(platform).unwrap(), Platform::Nanopore);
+/// }
+/// ```
+#[derive(Debug, Default, Eq, PartialEq)]
+pub enum Platform {
+    PacBio,
+    #[default]
+    Nanopore,
+}
+
+impl FromStr for Platform {
+    type Err = error::LrgeError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "pacbio" | "pb" => Ok(Platform::PacBio),
+            "nanopore" | "ont" => Ok(Platform::Nanopore),
+            _ => Err(error::LrgeError::InvalidPlatform(s.to_string())),
+        }
+    }
+}
 
 /// Generate a shuffled list of `k` indices from 0 to `n`.
 ///

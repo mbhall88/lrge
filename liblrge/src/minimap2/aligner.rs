@@ -1,12 +1,18 @@
-use super::mapping::Mapping;
-use super::thread_buf::BUF;
-use super::{IdxOpt, MapOpt};
-use minimap2_sys::*;
+//! Data structures and methods for working with the C bindings of minimap2.
+//!
+//! The code in this module has been adapted from the [`minimap2` crate](https://crates.io/crates/minimap2).
 use std::ffi::c_void;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
+use minimap2_sys::*;
+
+use super::mapping::PafRecord;
+use super::thread_buf::BUF;
+use super::{IdxOpt, MapOpt};
+
+/// An aligner for mapping sequences to an index created by minimap2
 #[derive(Clone)]
 pub(crate) struct Aligner {
     /// Index options passed to minimap2 (mm_idxopt_t)
@@ -47,14 +53,6 @@ mod send {
 impl Aligner {
     /// Create a new aligner with default options
     pub fn builder() -> Self {
-        // let mut aligner = Aligner {
-        //     mapopt: MapOpt {
-        //         seed: 11,
-        //         best_n: 5,
-        //         ..Default::default()
-        //     },
-        //     ..Default::default()
-        // };
         let mut aligner = Aligner::default();
 
         let result = unsafe {
@@ -65,15 +63,15 @@ impl Aligner {
                 &mut aligner.mapopt,
             )
         };
-        eprintln!("{:?}", aligner.mapopt);
-        // if the result is 0, success, if -1 then issue with preset
-        if result == -1 {
-            panic!("Preset not found: {:?}", aligner.mapopt);
+
+        if result < 0 {
+            panic!("Issue initialising the aligner options");
         }
 
         aligner
     }
 
+    /// Set the preset for the aligner
     pub fn preset(mut self, preset: &[u8]) -> Self {
         let result = unsafe {
             mm_set_opt(
@@ -193,7 +191,11 @@ impl Aligner {
     /// MD: Whether to output MD tag
     /// max_frag_len: Maximum fragment length
     /// extra_flags: Extra flags to pass to minimap2 as `Vec<u64>`
-    pub fn map(&self, seq: &[u8], query_name: Option<&[u8]>) -> Result<Vec<Mapping>, &'static str> {
+    pub fn map(
+        &self,
+        seq: &[u8],
+        query_name: Option<&[u8]>,
+    ) -> Result<Vec<PafRecord>, &'static str> {
         // Make sure index is set
         if self.idx.is_none() {
             return Err("No index");
@@ -257,7 +259,7 @@ impl Aligner {
                     // rl:i:<INT> Length of query regions harboring repetitive seeds
                     let rl = (*buf.borrow_mut().get_buf()).rep_len;
 
-                    mappings.push(Mapping {
+                    mappings.push(PafRecord {
                         target_name,
                         target_len: (*((*(self.idx.unwrap())).seq.offset(reg.rid as isize))).len
                             as i32,

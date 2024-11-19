@@ -1,17 +1,23 @@
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+//! Data structure for PAF records along with serialization and deserialization methods.
 use std::str::FromStr;
 
-/// Mapping result
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+/// Mapping result - i.e., PafRecord
+/// See https://lh3.github.io/minimap2/minimap2.html for full details of the PAF format provided by minimap2
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub(crate) struct Mapping {
+pub(crate) struct PafRecord {
     #[serde(
         serialize_with = "serialize_bytes",
         deserialize_with = "deserialize_bytes"
     )]
     pub query_name: Vec<u8>,
     pub query_len: i32,
+    /// Query start coordinate (0-based)
     pub query_start: i32,
+    /// Query end coordinate (0-based)
     pub query_end: i32,
+    /// ‘+’ if query/target on the same strand; ‘-’ if opposite
     pub strand: char,
     #[serde(
         serialize_with = "serialize_bytes",
@@ -19,19 +25,29 @@ pub(crate) struct Mapping {
     )]
     pub target_name: Vec<u8>,
     pub target_len: i32,
+    /// Target start coordinate on the original strand
     pub target_start: i32,
+    /// Target end coordinate on the original strand
     pub target_end: i32,
+    /// Number of matching bases in the mapping
     pub match_len: i32,
+    /// Number bases, including gaps, in the mapping
     pub block_len: i32,
+    /// Mapping quality (0-255 with 255 for missing)
     pub mapq: u32,
+    /// Type of aln: P/primary, S/secondary and I,i/inversion
     #[serde(serialize_with = "serialize_tp", deserialize_with = "deserialize_tag")]
     pub tp: char,
+    /// Number of minimizers on the chain
     #[serde(serialize_with = "serialize_cm", deserialize_with = "deserialize_tag")]
     pub cm: i32,
+    /// Number of residues in the matching chain (chaining score)
     #[serde(serialize_with = "serialize_s1", deserialize_with = "deserialize_tag")]
     pub s1: i32,
+    /// Approximate per-base sequence divergence
     #[serde(serialize_with = "serialize_dv", deserialize_with = "deserialize_tag")]
     pub dv: f32,
+    /// Length of query regions harboring repetitive seeds
     #[serde(serialize_with = "serialize_rl", deserialize_with = "deserialize_tag")]
     pub rl: i32,
 }
@@ -81,7 +97,7 @@ where
     serialize_tag_with_name("s1", value, serializer)
 }
 
-/// Serialize the dv tag
+/// Serialize the dv tag - format the float with 4 decimal places
 fn serialize_dv<S>(value: &f32, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -141,7 +157,7 @@ mod tests {
     #[test]
     fn test_deserialize_mapping() {
         let buf = b"SRR28370649.1\t4402\t40\t237\t-\tSRR28370649.7311\t5094\t41\t238\t190\t197\t0\ttp:A:S\tcm:i:59\ts1:i:190\tdv:f:0.0022\trl:i:56";
-        let expected = Mapping {
+        let expected = PafRecord {
             query_name: b"SRR28370649.1".to_vec(),
             query_len: 4402,
             query_start: 40,
@@ -167,14 +183,14 @@ mod tests {
         for result in rdr.deserialize() {
             // Notice that we need to provide a type hint for automatic
             // deserialization.
-            let mapping: Mapping = result.unwrap();
+            let mapping: PafRecord = result.unwrap();
             assert_eq!(mapping, expected);
         }
     }
 
     #[test]
     fn test_serialize_mapping() {
-        let mapping = Mapping {
+        let mapping = PafRecord {
             query_name: b"SRR28370649.1".to_vec(),
             query_len: 4402,
             query_start: 40,
@@ -206,7 +222,7 @@ mod tests {
 
     #[test]
     fn test_serialize_mapping_dv_round_down() {
-        let mapping = Mapping {
+        let mapping = PafRecord {
             query_name: b"SRR28370649.1".to_vec(),
             query_len: 4402,
             query_start: 40,
@@ -238,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_serialize_mapping_dv_round_up() {
-        let mapping = Mapping {
+        let mapping = PafRecord {
             query_name: b"SRR28370649.1".to_vec(),
             query_len: 4402,
             query_start: 40,

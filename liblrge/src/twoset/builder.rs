@@ -1,3 +1,4 @@
+use crate::Platform;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -10,6 +11,7 @@ pub struct Builder {
     tmpdir: PathBuf,
     threads: usize,
     seed: Option<u64>,
+    platform: Platform,
 }
 
 impl Default for Builder {
@@ -20,6 +22,7 @@ impl Default for Builder {
             tmpdir: env!("TMPDIR").into(),
             threads: 1,
             seed: None,
+            platform: Platform::default(),
         }
     }
 }
@@ -114,6 +117,20 @@ impl Builder {
         self
     }
 
+    /// Set the sequencing platform for the strategy. By default, this is [`Platform::Nanopore`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use liblrge::{twoset::Builder, Platform};
+    ///
+    /// let builder = Builder::new().platform(Platform::PacBio);
+    /// ```
+    pub fn platform(mut self, platform: Platform) -> Self {
+        self.platform = platform;
+        self
+    }
+
     /// Build the [`TwoSetStrategy`], using the given number of target and query reads.
     ///
     /// # Examples
@@ -131,6 +148,7 @@ impl Builder {
             tmpdir: self.tmpdir,
             threads: self.threads,
             seed: self.seed,
+            platform: self.platform,
         }
     }
 }

@@ -1,5 +1,7 @@
-use minimap2_sys::{mm_tbuf_destroy, mm_tbuf_init, mm_tbuf_t};
+//! The code in this module is adapted from the [`minimap2` crate](https://github.com/jguhlin/minimap2-rs).
 use std::cell::RefCell;
+
+use minimap2_sys::{mm_tbuf_destroy, mm_tbuf_init, mm_tbuf_t};
 
 // Thread local buffer (memory management) for minimap2
 thread_local! {
@@ -24,8 +26,7 @@ impl ThreadLocalBuffer {
         }
     }
     /// Return the buffer, checking how many times it has been borrowed.
-    /// Free the memory of the old buffer and reinitialise a new one If
-    /// num_uses exceeds max_uses.
+    /// Free the memory of the old buffer and reinitialise a new one Ii num_uses exceeds max_uses.
     pub fn get_buf(&mut self) -> *mut mm_tbuf_t {
         if self.uses > self.max_uses {
             self.free_buffer();

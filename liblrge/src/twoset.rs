@@ -3,8 +3,8 @@ mod builder;
 
 pub use self::builder::Builder;
 use crate::io::FastqRecordExt;
-use crate::minimap2::Aligner;
-use crate::{error::LrgeError, io, minimap2, unique_random_set, Estimate};
+use crate::minimap2::{Aligner, Preset};
+use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
 use crossbeam_channel as channel;
 use log::{debug, warn};
 use needletail::{parse_fastx_file, parse_fastx_reader};
@@ -36,6 +36,8 @@ pub struct TwoSetStrategy {
     threads: usize,
     /// The (optional) seed to use for randomly selecting reads.
     seed: Option<u64>,
+    /// Sequencing platform of the reads.
+    platform: Platform,
 }
 
 impl TwoSetStrategy {
@@ -181,7 +183,12 @@ impl Estimate for TwoSetStrategy {
     fn generate_estimates(&mut self) -> crate::Result<Vec<f32>> {
         let (target_file, query_file, _avg_query_len) = self.split_fastq()?;
 
-        let aligner = AlignerWrapper::new(&target_file, self.threads)?;
+        let preset = match self.platform {
+            Platform::PacBio => Preset::AvaPb,
+            Platform::Nanopore => Preset::AvaOnt,
+        };
+
+        let aligner = AlignerWrapper::new(&target_file, self.threads, preset, true)?;
         let _alignments = aligner.align_reads(query_file, &self.tmpdir)?;
 
         // for mapping in alignments {
@@ -217,10 +224,15 @@ struct AlignerWrapper {
 }
 
 impl AlignerWrapper {
-    fn new(target_file: &Path, threads: usize) -> Result<Self, LrgeError> {
+    fn new(
+        target_file: &Path,
+        threads: usize,
+        preset: Preset,
+        dual: bool,
+    ) -> Result<Self, LrgeError> {
         let aligner = Aligner::builder()
-            .preset(minimap2::AVA_ONT)
-            .dual(true)
+            .preset(preset.as_bytes())
+            .dual(dual)
             .with_index_threads(threads)
             .with_index(target_file, None)
             .unwrap();

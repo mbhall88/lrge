@@ -14,6 +14,9 @@ pub enum LrgeError {
 
     /// Too few reads were requested.
     TooFewReadsError(String),
+
+    /// Invalid platform string.
+    InvalidPlatform(String),
 }
 
 impl fmt::Display for LrgeError {
@@ -23,6 +26,7 @@ impl fmt::Display for LrgeError {
             LrgeError::FastqParseError(msg) => write!(f, "FASTQ parse error: {}", msg),
             LrgeError::TooManyReadsError(msg) => write!(f, "Too many reads requested: {}", msg),
             LrgeError::TooFewReadsError(msg) => write!(f, "Too few reads requested: {}", msg),
+            LrgeError::InvalidPlatform(msg) => write!(f, "Invalid platform: {}", msg),
         }
     }
 }
