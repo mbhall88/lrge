@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 /// Mapping result
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct Mapping {
+pub(crate) struct Mapping {
     #[serde(
         serialize_with = "serialize_bytes",
         deserialize_with = "deserialize_bytes"
