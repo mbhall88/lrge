@@ -1,20 +1,17 @@
 //! A strategy that compares overlaps between two sets of reads.
 mod builder;
 
-pub use self::builder::Builder;
-use crate::error::LrgeError::ThreadError;
-use crate::io::FastqRecordExt;
-use crate::minimap2::{Aligner, Preset};
-use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
-use crossbeam_channel as channel;
-use log::{debug, warn};
-use needletail::{parse_fastx_file, parse_fastx_reader};
-use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+
+use log::{debug, warn};
+use needletail::parse_fastx_reader;
+
+pub use self::builder::Builder;
+use crate::minimap2::{AlignerWrapper, Preset};
+use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 5000;
 pub const DEFAULT_QUERY_NUM_READS: usize = 10000;
@@ -196,114 +193,6 @@ impl Estimate for TwoSetStrategy {
 
         let estimates = vec![0.0; self.target_num_reads];
         Ok(estimates)
-    }
-}
-
-struct AlignerWrapper {
-    aligner: Arc<Aligner>, // Shared aligner across threads
-    threads: usize,
-}
-
-impl AlignerWrapper {
-    fn new(
-        target_file: &Path,
-        threads: usize,
-        preset: Preset,
-        dual: bool,
-    ) -> Result<Self, LrgeError> {
-        let aligner = Aligner::builder()
-            .preset(preset.as_bytes())
-            .dual(dual)
-            .with_index_threads(threads)
-            .with_index(target_file, None)
-            .unwrap();
-
-        Ok(Self {
-            aligner: Arc::new(aligner),
-            threads,
-        })
-    }
-
-    fn align_reads(&self, query_file: PathBuf, tmpdir: &Path) -> Result<PathBuf, LrgeError> {
-        let (sender, receiver) = channel::bounded(1000); // Bounded channel to control memory usage
-        let aligner = Arc::clone(&self.aligner); // Shared reference for the producer thread
-
-        // Producer: Read FASTQ records and send them to the channel
-        let producer = std::thread::spawn(move || -> Result<(), LrgeError> {
-            let mut fastx_reader = parse_fastx_file(query_file).map_err(|e| {
-                LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {}", e))
-            })?;
-
-            while let Some(record) = fastx_reader.next() {
-                match record {
-                    Ok(rec) => {
-                        let msg =
-                            io::Message::Data((rec.read_id().to_owned(), rec.seq().into_owned()));
-                        if sender.send(msg).is_err() {
-                            break; // Exit if the receiver is dropped
-                        }
-                    }
-                    Err(e) => {
-                        return Err(LrgeError::FastqParseError(format!(
-                            "Error parsing query FASTQ file: {}",
-                            e
-                        )));
-                    }
-                }
-            }
-            // sender.send(io::Message::End).unwrap();
-            // Close the channel to signal that no more records will be sent
-            drop(sender);
-            Ok(())
-        });
-
-        // Open the output file for writing
-        let paf_path = tmpdir.join("overlaps.paf");
-        let mut buf = File::create(&paf_path).map(BufWriter::new)?;
-        let writer = csv::WriterBuilder::new()
-            .has_headers(false)
-            .delimiter(b'\t')
-            .from_writer(&mut buf);
-        // Wrap the writer in an Arc<Mutex> for thread-safe use
-        let writer = Arc::new(Mutex::new(writer));
-
-        // set the number of threads to use with rayon in the below code
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(self.threads)
-            .build()
-            .map_err(|e| ThreadError(format!("Error setting number of threads: {}", e)))?;
-
-        // Consumer: Process records from the channel in parallel
-        pool.install(|| -> Result<(), LrgeError> {
-            receiver
-                .into_iter()
-                .par_bridge() // Parallelize the processing
-                .try_for_each(|record| -> Result<(), LrgeError> {
-                    let io::Message::Data((rid, seq)) = record;
-                    debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
-                    let mut qname = rid.to_owned();
-                    if qname.last() != Some(&0) {
-                        qname.push(0);
-                    }
-                    // Use the shared aligner to perform alignment
-                    let mappings = aligner.map(&seq, Some(&rid)).unwrap();
-                    {
-                        let mut writer_lock = writer.lock().unwrap();
-                        for mapping in mappings {
-                            writer_lock.serialize(mapping)?;
-                        }
-                    }
-                    Ok(())
-                })?;
-            Ok(())
-        })?;
-
-        // Wait for the producer to finish
-        producer
-            .join()
-            .map_err(|e| ThreadError(format!("Thread paniced when joining: {:?}", e)))??;
-
-        Ok(paf_path)
     }
 }
 

@@ -55,15 +55,15 @@ pub(crate) mod io;
 pub(crate) mod minimap2;
 pub mod twoset;
 
+use rand::rngs::StdRng;
+use rand::SeedableRng;
+
 pub use self::estimate::Estimate;
 pub use self::twoset::TwoSetStrategy;
 use std::str::FromStr;
 
-use rand::rngs::StdRng;
-use rand::SeedableRng;
-
-// Define a type alias for `Result` with `MyError` as the error type
-type Result<T> = std::result::Result<T, error::LrgeError>;
+/// A type alias for `Result` with [`LrgeError`] as the error type.
+pub type Result<T> = std::result::Result<T, error::LrgeError>;
 
 /// The sequencing platform used to generate the reads.
 ///
