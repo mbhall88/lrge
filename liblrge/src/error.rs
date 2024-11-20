@@ -24,6 +24,9 @@ pub enum LrgeError {
 
     /// Error writing PAF file
     PafWriteError(String),
+
+    /// Error mapping a read
+    MapError(String),
 }
 
 impl fmt::Display for LrgeError {
@@ -36,6 +39,7 @@ impl fmt::Display for LrgeError {
             LrgeError::InvalidPlatform(msg) => write!(f, "Invalid platform: {}", msg),
             LrgeError::ThreadError(msg) => write!(f, "Error relating to threads: {}", msg),
             LrgeError::PafWriteError(msg) => write!(f, "Error writing PAF file: {}", msg),
+            LrgeError::MapError(msg) => write!(f, "Error mapping a read: {}", msg),
         }
     }
 }

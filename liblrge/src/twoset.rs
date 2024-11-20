@@ -5,11 +5,16 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-use log::{debug, warn};
-use needletail::parse_fastx_reader;
+use crossbeam_channel as channel;
+use log::{debug, trace, warn};
+use needletail::{parse_fastx_file, parse_fastx_reader};
+use rayon::prelude::*;
 
 pub use self::builder::Builder;
+use crate::estimate::per_read_estimate;
+use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
 use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
 
@@ -98,7 +103,7 @@ impl TwoSetStrategy {
         debug!("Writing target and query reads to temporary files...");
         let mut target_writer = File::create(&target_file).map(BufWriter::new)?;
         let mut query_writer = File::create(&query_file).map(BufWriter::new)?;
-        let mut sum_query_len = 0;
+        let mut sum_target_len = 0;
         let mut idx: u32 = 0;
         while let Some(r) = fastx_reader.next() {
             // we can unwrap here because we know the file is valid from when we counted the records
@@ -108,11 +113,11 @@ impl TwoSetStrategy {
                 record.write(&mut target_writer, None).map_err(|e| {
                     LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
                 })?;
+                sum_target_len += record.num_bases();
             } else if query_indices.remove(&idx) {
                 record.write(&mut query_writer, None).map_err(|e| {
                     LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
                 })?;
-                sum_query_len += record.num_bases();
             }
 
             if target_indices.is_empty() && query_indices.is_empty() {
@@ -122,12 +127,175 @@ impl TwoSetStrategy {
             idx += 1;
         }
 
-        let avg_query_len = sum_query_len as f32 / self.query_num_reads as f32;
+        let avg_target_len = sum_target_len as f32 / self.target_num_reads as f32;
         debug!("Target reads written to: {}", target_file.display());
         debug!("Query reads written to: {}", query_file.display());
-        debug!("Average query read length: {}", avg_query_len);
+        debug!("Average target read length: {}", avg_target_len);
 
-        Ok((target_file, query_file, avg_query_len))
+        Ok((target_file, query_file, avg_target_len))
+    }
+
+    /// Align the query reads to the target reads and write the overlaps to a PAF file.
+    fn align_reads(
+        &self,
+        aln_wrapper: AlignerWrapper,
+        query_file: PathBuf,
+        avg_target_len: f32,
+    ) -> Result<Vec<f32>, LrgeError> {
+        // Bounded channel to control memory usage - i.e., 10000 records in the channel at a time
+        let (sender, receiver) = channel::bounded(10000);
+        let aligner = Arc::clone(&aln_wrapper.aligner); // Shared reference for the producer thread
+        let overlap_threshold = aln_wrapper.aligner.mapopt.min_chain_score as u32;
+
+        // Producer: Read FASTQ records and send them to the channel
+        let producer = std::thread::spawn(move || -> Result<(), LrgeError> {
+            let mut fastx_reader = parse_fastx_file(query_file).map_err(|e| {
+                LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {}", e))
+            })?;
+
+            while let Some(record) = fastx_reader.next() {
+                match record {
+                    Ok(rec) => {
+                        let msg =
+                            io::Message::Data((rec.read_id().to_owned(), rec.seq().into_owned()));
+                        if sender.send(msg).is_err() {
+                            break; // Exit if the receiver is dropped
+                        }
+                    }
+                    Err(e) => {
+                        return Err(LrgeError::FastqParseError(format!(
+                            "Error parsing query FASTQ file: {}",
+                            e
+                        )));
+                    }
+                }
+            }
+
+            // Close the channel to signal that no more records will be sent
+            drop(sender);
+            Ok(())
+        });
+
+        // Open the output PAF file for writing
+        let paf_path = self.tmpdir.join("overlaps.paf");
+        let mut buf = File::create(&paf_path).map(BufWriter::new)?;
+        let writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .delimiter(b'\t')
+            .from_writer(&mut buf);
+
+        let writer = Arc::new(Mutex::new(writer)); // thread-safe writer
+
+        // set the number of threads to use with rayon in the following mapping code
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(self.threads)
+            .build()
+            .map_err(|e| {
+                LrgeError::ThreadError(format!("Error setting number of threads: {}", e))
+            })?;
+
+        let estimates = Vec::with_capacity(self.query_num_reads);
+        let estimates = Arc::new(Mutex::new(estimates));
+
+        // Consumer: Process records from the channel in parallel
+        pool.install(|| -> Result<(), LrgeError> {
+            receiver
+                .into_iter()
+                .par_bridge() // Parallelize the processing
+                .try_for_each(|record| -> Result<(), LrgeError> {
+                    let io::Message::Data((rid, seq)) = record;
+                    debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
+
+                    let mut qname = rid.to_owned();
+                    if qname.last() != Some(&0) {
+                        // Ensure the qname is null-terminated
+                        qname.push(0);
+                    }
+
+                    // Use the shared aligner to perform alignment
+                    let mappings = aligner.map(&seq, Some(&rid)).map_err(|e| {
+                        LrgeError::MapError(format!(
+                            "Error mapping read {}: {}",
+                            String::from_utf8_lossy(&qname),
+                            e
+                        ))
+                    })?;
+
+                    let mut unique_overlaps = HashSet::new();
+
+                    if !mappings.is_empty() {
+                        {
+                            let mut writer_lock = writer.lock().unwrap();
+                            for mapping in &mappings {
+                                // write the PafRecord to the PAF file
+                                writer_lock.serialize(mapping)?;
+                                unique_overlaps.insert(mapping.target_name.clone());
+                            }
+                        }
+                    } else {
+                        debug!(
+                            "No mappings found for read: {:?}",
+                            String::from_utf8_lossy(&qname)
+                        );
+                    }
+
+                    let est = per_read_estimate(
+                        seq.len(),
+                        avg_target_len,
+                        self.target_num_reads,
+                        unique_overlaps.len(),
+                        overlap_threshold,
+                    );
+
+                    trace!("Estimate for {}: {}", String::from_utf8_lossy(&qname), est);
+
+                    {
+                        // Lock the estimates vector and push the estimate
+                        let mut estimates_lock = estimates.lock().unwrap();
+                        estimates_lock.push(est);
+                    }
+
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
+
+        // Wait for the producer to finish
+        producer.join().map_err(|e| {
+            LrgeError::ThreadError(format!("Thread panicked when joining: {:?}", e))
+        })??;
+
+        debug!("Overlaps written to: {:?}", paf_path);
+
+        // we extract the estimates from the Arc and Mutex
+        let estimates = Arc::try_unwrap(estimates)
+            .map_err(|_| {
+                LrgeError::ThreadError(
+                    "Error unwrapping estimates Arc<Mutex<Vec<f32>>>".to_string(),
+                )
+            })?
+            .into_inner()
+            .map_err(|_| {
+                LrgeError::ThreadError("Error unwrapping estimates Mutex<Vec<f32>>".to_string())
+            })?;
+
+        Ok(estimates)
+    }
+}
+
+impl Estimate for TwoSetStrategy {
+    fn generate_estimates(&mut self) -> crate::Result<Vec<f32>> {
+        let (target_file, query_file, avg_target_len) = self.split_fastq()?;
+
+        let preset = match self.platform {
+            Platform::PacBio => Preset::AvaPb,
+            Platform::Nanopore => Preset::AvaOnt,
+        };
+
+        let aligner = AlignerWrapper::new(&target_file, self.threads, preset, true)?;
+        let estimates = self.align_reads(aligner, query_file, avg_target_len)?;
+
+        Ok(estimates)
     }
 }
 
@@ -175,25 +343,6 @@ pub(crate) fn split_into_hashsets<T: std::hash::Hash + Eq>(
     }
 
     (first_set, second_set)
-}
-
-impl Estimate for TwoSetStrategy {
-    fn generate_estimates(&mut self) -> crate::Result<Vec<f32>> {
-        let (target_file, query_file, _avg_query_len) = self.split_fastq()?;
-
-        let preset = match self.platform {
-            Platform::PacBio => Preset::AvaPb,
-            Platform::Nanopore => Preset::AvaOnt,
-        };
-
-        let aligner = AlignerWrapper::new(&target_file, self.threads, preset, true)?;
-        let paf_file = aligner.align_reads(query_file, &self.tmpdir)?;
-
-        debug!("Overlaps written to: {}", paf_file.display());
-
-        let estimates = vec![0.0; self.target_num_reads];
-        Ok(estimates)
-    }
 }
 
 #[cfg(test)]

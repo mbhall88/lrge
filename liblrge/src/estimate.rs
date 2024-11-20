@@ -50,6 +50,29 @@ fn median(iter: impl Iterator<Item = f32>) -> Option<f32> {
     }
 }
 
+// todo add link to paper
+/// Estimate genome size using the formula from Equation 3 in the paper.
+///
+/// # Returns
+///
+/// A floating point number representing the estimated genome size. If the number of overlaps is 0,
+/// this function will return [`f32::INFINITY`].
+pub(crate) fn per_read_estimate(
+    read_len: usize,
+    avg_target_len: f32,
+    n_target_reads: usize,
+    n_ovlaps: usize,
+    ovlap_thresh: u32,
+) -> f32 {
+    if n_ovlaps == 0 {
+        return f32::INFINITY;
+    }
+
+    let ovlap_ratio: f32 = n_target_reads as f32 / n_ovlaps as f32;
+
+    ovlap_ratio * (read_len as f32 + avg_target_len - 2.0 * ovlap_thresh as f32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +147,45 @@ mod tests {
     fn test_median_with_inf_and_regular_values() {
         let data = vec![-1.0, f32::NEG_INFINITY, 0.0, 1.0, f32::INFINITY];
         assert_eq!(median(data.into_iter()), Some(0.0));
+    }
+
+    #[test]
+    fn test_per_read_estimate() {
+        let read_len = 100;
+        let avg_target_len = 200.0;
+        let n_target_reads = 1000;
+        let n_ovlaps = 100;
+        let ovlap_thresh = 10;
+        let expected = 2800.0;
+        assert_eq!(
+            per_read_estimate(
+                read_len,
+                avg_target_len,
+                n_target_reads,
+                n_ovlaps,
+                ovlap_thresh
+            ),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_per_read_estimate_zero_ovlaps() {
+        let read_len = 100;
+        let avg_target_len = 200.0;
+        let n_target_reads = 1000;
+        let n_ovlaps = 0;
+        let ovlap_thresh = 10;
+        let expected = f32::INFINITY;
+        assert_eq!(
+            per_read_estimate(
+                read_len,
+                avg_target_len,
+                n_target_reads,
+                n_ovlaps,
+                ovlap_thresh
+            ),
+            expected
+        );
     }
 }

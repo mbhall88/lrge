@@ -1,5 +1,5 @@
-use crate::utils::create_temp_dir;
-use anyhow::Result;
+use crate::utils::{create_temp_dir, format_estimate};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use liblrge::Estimate;
 use log::{debug, info, LevelFilter};
@@ -62,15 +62,32 @@ fn main() -> Result<()> {
         unreachable!("No strategy could be determined. Please raise an issue at <https://github.com/mbhall88/lrge/issues>")
     };
 
-    let _estimates = strategy.generate_estimates()?;
+    let estimate = if args.with_infinity {
+        strategy.estimate_with_infinity()
+    } else {
+        strategy.estimate()
+    }
+    .context("Failed to generate estimate")?;
 
-    // if log::log_enabled!(log::Level::Trace) {
-    //     for (rid, est) in estimates {
-    //         trace!("Estimate for {}: {}", String::from_utf8_lossy(rid), est);
-    //     }
-    // }
+    match estimate {
+        Some(est) => {
+            let formatted_est = format_estimate(est);
+            info!("Estimated genome size: {formatted_est}");
 
-    // todo!("Determine the median of the estimates, depending on whether infinite estimates are to be included");
+            if args.precise {
+                println!("{est}");
+            } else {
+                println!("{est:.0}");
+            }
+        }
+        None => {
+            if args.with_infinity {
+                bail!("No estimates were generated")
+            } else {
+                bail!("No finite estimates were generated")
+            }
+        }
+    }
 
     info!("Done!");
     Ok(())

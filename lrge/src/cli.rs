@@ -2,8 +2,8 @@ use clap::{builder::ArgPredicate, Parser};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
-const TARGET_NUM_READS: &str = "5000";
-const QUERY_NUM_READS: &str = "10000";
+const TARGET_NUM_READS: &str = "10000";
+const QUERY_NUM_READS: &str = "5000";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -43,6 +43,14 @@ pub struct Args {
     /// Random seed to use - making the estimate repeatable
     #[clap(short = 's', long = "seed", value_name = "INT")]
     pub seed: Option<u64>,
+
+    /// Take the estimate as the median of all estimates, *including infinite estimates*
+    #[arg(short = '8', long = "inf", hide_short_help = true)]
+    pub with_infinity: bool,
+
+    /// I neeeeeed that precision! Output the estimate as a floating point number
+    #[arg(short = 'f', long = "float-my-boat", hide_short_help = true)]
+    pub precise: bool,
 
     /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
     #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]
