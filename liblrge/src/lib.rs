@@ -48,18 +48,22 @@
 //! [xz]: https://crates.io/liblzma
 //! [bzip2]: https://crates.io/crates/bzip2
 //! [magic]: https://en.wikipedia.org/wiki/Magic_number_(programming)#In_files
-// #![deny(missing_docs)]
+// todo add link to paper
+// todo add library denies such as #![deny(missing_docs)]
+// todo add info on how to suppress logging
 pub mod error;
 pub mod estimate;
 pub(crate) mod io;
 pub(crate) mod minimap2;
 pub mod twoset;
+pub mod ava;
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 pub use self::estimate::Estimate;
 pub use self::twoset::TwoSetStrategy;
+pub use self::ava::AvaStrategy;
 use std::str::FromStr;
 
 /// A type alias for `Result` with [`LrgeError`] as the error type.

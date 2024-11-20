@@ -1,4 +1,4 @@
-//! A strategy that compares overlaps between two sets of reads.
+//! A strategy that compares overlaps between two different sets of reads.
 mod builder;
 
 use std::collections::HashSet;
@@ -18,8 +18,8 @@ use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
 use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
 
-pub const DEFAULT_TARGET_NUM_READS: usize = 10000;
-pub const DEFAULT_QUERY_NUM_READS: usize = 5000;
+pub const DEFAULT_TARGET_NUM_READS: usize = 10_000;
+pub const DEFAULT_QUERY_NUM_READS: usize = 5_000;
 
 /// A strategy that compares overlaps between two sets of reads.
 ///
@@ -46,7 +46,7 @@ pub struct TwoSetStrategy {
 impl TwoSetStrategy {
     /// Create a new `TwoSetStrategy` with the default settings, using the given input file.
     ///
-    /// To customize the strategy, use the [`Builder`] interface.
+    /// To customise the strategy, use the [`Builder`] interface.
     pub fn new<P: AsRef<Path>>(input: P) -> Self {
         let builder = Builder::default();
 

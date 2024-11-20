@@ -131,7 +131,7 @@ impl Builder {
         self
     }
 
-    /// Build the [`TwoSetStrategy`], using the given number of target and query reads.
+    /// Build the [`TwoSetStrategy`], using the reads from the given `input` file.
     ///
     /// # Examples
     ///
