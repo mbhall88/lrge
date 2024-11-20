@@ -53,7 +53,7 @@ pub(crate) struct PafRecord {
 }
 
 /// Serialize `Vec<u8>` as a UTF-8 string
-fn serialize_bytes<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_bytes<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -102,8 +102,12 @@ fn serialize_dv<S>(value: &f32, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    // format the float with 4 decimal places
-    let value = format!("{:.4}", value);
+    // format the float with 4 decimal places, or if the value is zero, just serialize it as an integer
+    let value = if *value < f32::EPSILON {
+        "0".to_string()
+    } else {
+        format!("{:.4}", value)
+    };
     serialize_tag_with_name("dv", &value, serializer)
 }
 
@@ -313,6 +317,38 @@ mod tests {
         let result = wtr.into_inner().unwrap();
         let result = String::from_utf8(result).unwrap();
         let expected = "SRR28370649.1\t4402\t40\t237\t-\tSRR28370649.7311\t5094\t41\t238\t190\t197\t0\ttp:A:S\tcm:i:59\ts1:i:190\tdv:f:0.0040\trl:i:56\n";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_serialize_mapping_dv_zero() {
+        let mapping = PafRecord {
+            query_name: b"SRR28370649.1".to_vec(),
+            query_len: 4402,
+            query_start: 40,
+            query_end: 237,
+            strand: '-',
+            target_name: b"SRR28370649.7311".to_vec(),
+            target_len: 5094,
+            target_start: 41,
+            target_end: 238,
+            match_len: 190,
+            block_len: 197,
+            mapq: 0,
+            tp: 'S',
+            cm: 59,
+            s1: 190,
+            dv: 0.0000,
+            rl: 56,
+        };
+        let mut wtr = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .has_headers(false)
+            .from_writer(vec![]);
+        wtr.serialize(mapping).unwrap();
+        let result = wtr.into_inner().unwrap();
+        let result = String::from_utf8(result).unwrap();
+        let expected = "SRR28370649.1\t4402\t40\t237\t-\tSRR28370649.7311\t5094\t41\t238\t190\t197\t0\ttp:A:S\tcm:i:59\ts1:i:190\tdv:f:0\trl:i:56\n";
         assert_eq!(result, expected);
     }
 }

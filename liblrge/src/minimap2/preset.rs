@@ -1,4 +1,5 @@
 /// Preset options for minimap2
+#[allow(dead_code)]
 pub(crate) enum Preset {
     /// Align noisy long reads of ~10% error rate to a reference genome. This is the default mode.
     MapOnt,

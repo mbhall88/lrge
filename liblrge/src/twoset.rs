@@ -2,6 +2,7 @@
 mod builder;
 
 pub use self::builder::Builder;
+use crate::error::LrgeError::ThreadError;
 use crate::io::FastqRecordExt;
 use crate::minimap2::{Aligner, Preset};
 use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
@@ -14,7 +15,6 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use crate::error::LrgeError::ThreadError;
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 5000;
 pub const DEFAULT_QUERY_NUM_READS: usize = 10000;
@@ -224,7 +224,7 @@ impl AlignerWrapper {
         })
     }
 
-    fn align_reads(&self, query_file: PathBuf, tmpdir: &PathBuf) -> Result<PathBuf, LrgeError> {
+    fn align_reads(&self, query_file: PathBuf, tmpdir: &Path) -> Result<PathBuf, LrgeError> {
         let (sender, receiver) = channel::bounded(1000); // Bounded channel to control memory usage
         let aligner = Arc::clone(&self.aligner); // Shared reference for the producer thread
 
@@ -237,10 +237,8 @@ impl AlignerWrapper {
             while let Some(record) = fastx_reader.next() {
                 match record {
                     Ok(rec) => {
-                        let msg = io::Message::Data((
-                            rec.read_id().to_owned(),
-                            Vec::from(rec.seq().to_owned()),
-                        ));
+                        let msg =
+                            io::Message::Data((rec.read_id().to_owned(), rec.seq().into_owned()));
                         if sender.send(msg).is_err() {
                             break; // Exit if the receiver is dropped
                         }
@@ -262,17 +260,21 @@ impl AlignerWrapper {
         // Open the output file for writing
         let paf_path = tmpdir.join("overlaps.paf");
         let mut buf = File::create(&paf_path).map(BufWriter::new)?;
-        let writer = csv::WriterBuilder::new().has_headers(false).delimiter(b'\t').from_writer(&mut buf);
+        let writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .delimiter(b'\t')
+            .from_writer(&mut buf);
         // Wrap the writer in an Arc<Mutex> for thread-safe use
         let writer = Arc::new(Mutex::new(writer));
 
         // set the number of threads to use with rayon in the below code
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(self.threads).build().map_err(
-            |e| ThreadError(format!("Error setting number of threads: {}", e)),
-        )?;
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(self.threads)
+            .build()
+            .map_err(|e| ThreadError(format!("Error setting number of threads: {}", e)))?;
 
         // Consumer: Process records from the channel in parallel
-        pool.install (|| -> Result<(), LrgeError> {
+        pool.install(|| -> Result<(), LrgeError> {
             receiver
                 .into_iter()
                 .par_bridge() // Parallelize the processing
@@ -297,7 +299,9 @@ impl AlignerWrapper {
         })?;
 
         // Wait for the producer to finish
-        producer.join().unwrap();
+        producer
+            .join()
+            .map_err(|e| ThreadError(format!("Thread paniced when joining: {:?}", e)))??;
 
         Ok(paf_path)
     }

@@ -2,7 +2,7 @@ use crate::utils::create_temp_dir;
 use anyhow::Result;
 use clap::Parser;
 use liblrge::Estimate;
-use log::{debug, info, trace, LevelFilter};
+use log::{debug, info, LevelFilter};
 
 mod cli;
 mod utils;

@@ -33,7 +33,7 @@ impl fmt::Display for LrgeError {
             LrgeError::TooManyReadsError(msg) => write!(f, "Too many reads requested: {}", msg),
             LrgeError::TooFewReadsError(msg) => write!(f, "Too few reads requested: {}", msg),
             LrgeError::InvalidPlatform(msg) => write!(f, "Invalid platform: {}", msg),
-            LrgeError::ThreadError(msg) => write!(f, "Error setting number of threads: {}", msg),
+            LrgeError::ThreadError(msg) => write!(f, "Error relating to threads: {}", msg),
             LrgeError::PafWriteError(msg) => write!(f, "Error writing PAF file: {}", msg),
         }
     }

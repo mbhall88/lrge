@@ -26,9 +26,6 @@ pub(crate) struct Aligner {
 
     /// Index created by minimap2
     pub idx: Option<*mut mm_idx_t>,
-
-    /// Index reader created by minimap2
-    pub idx_reader: Option<mm_idx_reader_t>,
 }
 
 /// Create a default aligner
@@ -39,7 +36,6 @@ impl Default for Aligner {
             mapopt: Default::default(),
             threads: 1,
             idx: None,
-            idx_reader: None,
         }
     }
 }
