@@ -51,19 +51,19 @@
 // todo add link to paper
 // todo add library denies such as #![deny(missing_docs)]
 // todo add info on how to suppress logging
+pub mod ava;
 pub mod error;
 pub mod estimate;
 pub(crate) mod io;
 pub(crate) mod minimap2;
 pub mod twoset;
-pub mod ava;
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
+pub use self::ava::AvaStrategy;
 pub use self::estimate::Estimate;
 pub use self::twoset::TwoSetStrategy;
-pub use self::ava::AvaStrategy;
 use std::str::FromStr;
 
 /// A type alias for `Result` with [`LrgeError`] as the error type.

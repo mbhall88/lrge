@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::{Platform};
-use super::{DEFAULT_AVA_NUM_READS, AvaStrategy};
+use super::{AvaStrategy, DEFAULT_AVA_NUM_READS};
+use crate::Platform;
 
 /// A builder for [`AvaStrategy`].
 pub struct Builder {
@@ -63,8 +63,8 @@ impl Builder {
     ///
     /// let builder = Builder::new().tmpdir(PathBuf::from("/tmp"));
     /// ```
-    pub fn tmpdir(mut self, tmpdir: PathBuf) -> Self {
-        self.tmpdir = tmpdir;
+    pub fn tmpdir<P: AsRef<Path>>(mut self, tmpdir: P) -> Self {
+        self.tmpdir = tmpdir.as_ref().to_path_buf();
         self
     }
 
@@ -82,7 +82,8 @@ impl Builder {
         self
     }
 
-    /// Set the seed for randomly selecting reads. By default, this is `None`.
+    /// Set the seed for the strategy. By default (`None`), the seed will be
+    /// [randomly generated](https://docs.rs/rand/latest/rand/fn.random.html).
     ///
     /// # Examples
     ///

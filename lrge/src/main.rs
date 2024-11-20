@@ -37,27 +37,30 @@ fn main() -> Result<()> {
         debug!("Created temporary directory at {:?}", tmpdir.path());
     }
 
-    let mut strategy = if let Some(num) = args.num_reads {
-        info!("Running with all-vs-all strategy with {} reads", num);
-        unimplemented!("All-vs-all strategy not yet implemented")
+    let mut strategy: Box<dyn Estimate> = if let Some(num) = args.num_reads {
+        info!("Running all-vs-all strategy with {} reads", num);
+        let builder = liblrge::ava::Builder::new()
+            .num_reads(num)
+            .threads(args.threads)
+            .tmpdir(tmpdir.path())
+            .seed(args.seed);
+
+        Box::new(builder.build(args.input))
     } else if let (Some(target_num_reads), Some(query_num_reads)) =
         (args.target_num_reads, args.query_num_reads)
     {
         info!(
-            "Running with two-set strategy with {} target reads and {} query reads",
+            "Running two-set strategy with {} target reads and {} query reads",
             target_num_reads, query_num_reads
         );
-        let mut builder = liblrge::twoset::Builder::new()
+        let builder = liblrge::twoset::Builder::new()
             .target_num_reads(target_num_reads)
             .query_num_reads(query_num_reads)
             .threads(args.threads)
-            .tmpdir(tmpdir.path());
+            .tmpdir(tmpdir.path())
+            .seed(args.seed);
 
-        if let Some(seed) = args.seed {
-            builder = builder.seed(seed);
-        }
-
-        builder.build(args.input)
+        Box::new(builder.build(args.input))
     } else {
         unreachable!("No strategy could be determined. Please raise an issue at <https://github.com/mbhall88/lrge/issues>")
     };

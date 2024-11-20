@@ -57,8 +57,18 @@ fn serialize_bytes<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
+    // remove any null bytes from the end
+    let bytes = trim_null_bytes(bytes);
     let s = String::from_utf8_lossy(bytes);
     serializer.serialize_str(&s)
+}
+
+fn trim_null_bytes(data: &[u8]) -> &[u8] {
+    if let Some(end) = data.iter().rposition(|&byte| byte != 0) {
+        &data[..=end] // Slice up to the last non-null byte
+    } else {
+        &[] // Return an empty slice if all bytes are null
+    }
 }
 
 /// Deserialize a UTF-8 string into `Vec<u8>`
@@ -196,6 +206,38 @@ mod tests {
     fn test_serialize_mapping() {
         let mapping = PafRecord {
             query_name: b"SRR28370649.1".to_vec(),
+            query_len: 4402,
+            query_start: 40,
+            query_end: 237,
+            strand: '-',
+            target_name: b"SRR28370649.7311".to_vec(),
+            target_len: 5094,
+            target_start: 41,
+            target_end: 238,
+            match_len: 190,
+            block_len: 197,
+            mapq: 0,
+            tp: 'S',
+            cm: 59,
+            s1: 190,
+            dv: 0.0022,
+            rl: 56,
+        };
+        let mut wtr = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .has_headers(false)
+            .from_writer(vec![]);
+        wtr.serialize(mapping).unwrap();
+        let result = wtr.into_inner().unwrap();
+        let result = String::from_utf8(result).unwrap();
+        let expected = "SRR28370649.1\t4402\t40\t237\t-\tSRR28370649.7311\t5094\t41\t238\t190\t197\t0\ttp:A:S\tcm:i:59\ts1:i:190\tdv:f:0.0022\trl:i:56\n";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_serialize_mapping_null_terminated_qname() {
+        let mapping = PafRecord {
+            query_name: b"SRR28370649.1\0".to_vec(),
             query_len: 4402,
             query_start: 40,
             query_end: 237,

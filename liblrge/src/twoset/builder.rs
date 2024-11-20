@@ -102,7 +102,7 @@ impl Builder {
         self
     }
 
-    /// Set the seed for the strategy. By default, the seed will be
+    /// Set the seed for the strategy. By default (`None`), the seed will be
     /// [randomly generated](https://docs.rs/rand/latest/rand/fn.random.html).
     ///
     /// # Examples
@@ -110,10 +110,10 @@ impl Builder {
     /// ```
     /// use liblrge::twoset::Builder;
     ///
-    /// let builder = Builder::new().seed(42);
+    /// let builder = Builder::new().seed(Some(42));
     /// ```
-    pub fn seed(mut self, seed: u64) -> Self {
-        self.seed = Some(seed);
+    pub fn seed(mut self, seed: Option<u64>) -> Self {
+        self.seed = seed;
         self
     }
 

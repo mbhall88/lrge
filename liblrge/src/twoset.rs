@@ -92,8 +92,8 @@ impl TwoSetStrategy {
         let (mut target_indices, mut query_indices) =
             split_into_hashsets(indices, self.target_num_reads);
 
-        let target_file = self.tmpdir.join("target.fastq");
-        let query_file = self.tmpdir.join("query.fastq");
+        let target_file = self.tmpdir.join("target.fq");
+        let query_file = self.tmpdir.join("query.fq");
 
         let reader = io::open_file(&self.input)?;
         let mut fastx_reader = parse_fastx_reader(reader).map_err(|e| {
@@ -183,7 +183,6 @@ impl TwoSetStrategy {
             .has_headers(false)
             .delimiter(b'\t')
             .from_writer(&mut buf);
-
         let writer = Arc::new(Mutex::new(writer)); // thread-safe writer
 
         // set the number of threads to use with rayon in the following mapping code
@@ -197,6 +196,7 @@ impl TwoSetStrategy {
         let estimates = Vec::with_capacity(self.query_num_reads);
         let estimates = Arc::new(Mutex::new(estimates));
 
+        debug!("Aligning reads and writing overlaps to PAF file...");
         // Consumer: Process records from the channel in parallel
         pool.install(|| -> Result<(), LrgeError> {
             receiver
@@ -204,7 +204,7 @@ impl TwoSetStrategy {
                 .par_bridge() // Parallelize the processing
                 .try_for_each(|record| -> Result<(), LrgeError> {
                     let io::Message::Data((rid, seq)) = record;
-                    debug!("Processing read: {:?}", String::from_utf8_lossy(&rid));
+                    trace!("Processing read: {:?}", String::from_utf8_lossy(&rid));
 
                     let mut qname = rid.to_owned();
                     if qname.last() != Some(&0) {
@@ -213,10 +213,10 @@ impl TwoSetStrategy {
                     }
 
                     // Use the shared aligner to perform alignment
-                    let mappings = aligner.map(&seq, Some(&rid)).map_err(|e| {
+                    let mappings = aligner.map(&seq, Some(&qname)).map_err(|e| {
                         LrgeError::MapError(format!(
                             "Error mapping read {}: {}",
-                            String::from_utf8_lossy(&qname),
+                            String::from_utf8_lossy(&rid),
                             e
                         ))
                     })?;
@@ -235,7 +235,7 @@ impl TwoSetStrategy {
                     } else {
                         debug!(
                             "No mappings found for read: {:?}",
-                            String::from_utf8_lossy(&qname)
+                            String::from_utf8_lossy(&rid)
                         );
                     }
 
