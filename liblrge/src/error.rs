@@ -1,3 +1,4 @@
+//! Error handling for liblrge.
 use std::fmt;
 
 /// A custom error type to represent various errors in liblrge.

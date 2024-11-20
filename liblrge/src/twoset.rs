@@ -13,14 +13,14 @@ pub use self::builder::Builder;
 use crate::minimap2::{AlignerWrapper, Preset};
 use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
 
-pub const DEFAULT_TARGET_NUM_READS: usize = 5000;
-pub const DEFAULT_QUERY_NUM_READS: usize = 10000;
+pub const DEFAULT_TARGET_NUM_READS: usize = 10000;
+pub const DEFAULT_QUERY_NUM_READS: usize = 5000;
 
 /// A strategy that compares overlaps between two sets of reads.
 ///
-/// The convention is to use a smaller set of target reads and a larger set of query reads. The
+/// The convention is to use a smaller set of query reads and a larger set of target reads. The
 /// query reads are overlapped with the target reads and an estimated genome size is calculated
-/// for **each target read** based on the number of overlaps it has with the query set.
+/// for **each query read** based on the number of overlaps it has with the target set.
 pub struct TwoSetStrategy {
     /// Path to the FASTQ file.
     input: PathBuf,
@@ -67,10 +67,10 @@ impl TwoSetStrategy {
 
         let mut n_req_reads = self.target_num_reads + self.query_num_reads;
 
-        if n_fq_reads <= self.target_num_reads {
+        if n_fq_reads <= self.query_num_reads {
             let msg = format!(
-                "Number of reads in FASTQ file ({}) is <= target number of reads ({})",
-                n_fq_reads, self.target_num_reads
+                "Number of reads in FASTQ file ({}) is <= query number of reads ({})",
+                n_fq_reads, self.query_num_reads
             );
             return Err(LrgeError::TooFewReadsError(msg));
         } else if n_fq_reads < n_req_reads {
@@ -78,9 +78,9 @@ impl TwoSetStrategy {
                 "Number of reads in FASTQ file ({}) is less than the sum of target and query reads ({})",
                 n_fq_reads, n_req_reads
             );
-            self.query_num_reads = n_fq_reads - self.target_num_reads;
+            self.target_num_reads = n_fq_reads - self.query_num_reads;
             n_req_reads = n_fq_reads;
-            warn!("Using {} query reads", self.query_num_reads);
+            warn!("Using {} target reads", self.target_num_reads);
         }
 
         let indices = unique_random_set(n_req_reads, n_fq_reads as u32, self.seed);
