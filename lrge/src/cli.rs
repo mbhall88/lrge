@@ -79,7 +79,7 @@ fn check_path_exists<S: AsRef<OsStr> + ?Sized>(s: &S) -> Result<PathBuf, String>
     if path.exists() {
         Ok(path)
     } else {
-        Err(format!("{:?} does not exist", path))
+        Err(format!("{} does not exist", path.to_string_lossy()))
     }
 }
 

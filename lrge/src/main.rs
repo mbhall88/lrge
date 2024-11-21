@@ -11,7 +11,8 @@ mod cli;
 mod utils;
 
 fn setup_logging(quiet: u8, verbose: u8) {
-    let sum = (verbose - quiet) as i16;
+    let sum = verbose as i8 - quiet as i8;
+
     let lvl = match sum {
         1 => LevelFilter::Debug,
         2.. => LevelFilter::Trace,
@@ -35,9 +36,15 @@ fn main() -> Result<()> {
 
     let tmpdir = create_temp_dir(args.temp_dir.as_ref(), args.keep_temp)?;
     if args.keep_temp {
-        info!("Created temporary directory at {:?}", tmpdir.path());
+        info!(
+            "Created temporary directory at {}",
+            tmpdir.path().to_string_lossy()
+        );
     } else {
-        debug!("Created temporary directory at {:?}", tmpdir.path());
+        debug!(
+            "Created temporary directory at {}",
+            tmpdir.path().to_string_lossy()
+        );
     }
 
     let mut output: Box<dyn Write> = if args.output == "-" {
@@ -74,9 +81,13 @@ fn main() -> Result<()> {
         unreachable!("No strategy could be determined. Please raise an issue at <https://github.com/mbhall88/lrge/issues>")
     };
 
-    let (low_q, estimate, upper_q) = strategy
+    let est_result = strategy
         .estimate(!args.with_infinity, Some(args.lower_q), Some(args.upper_q))
         .context("Failed to generate estimate")?;
+
+    let estimate = est_result.median;
+    let low_q = est_result.lower;
+    let upper_q = est_result.upper;
 
     match estimate {
         Some(est) => {

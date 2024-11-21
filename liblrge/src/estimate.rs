@@ -5,6 +5,17 @@ pub const LOWER_QUANTILE: f32 = 0.15;
 /// The upper quantile we found to give the highest confidence in our analysis.
 pub const UPPER_QUANTILE: f32 = 0.65;
 
+pub struct EstimateResult {
+    /// The lower quantile of the estimates
+    pub lower: Option<f32>,
+    /// The median of the estimates - this is the genome size estimate
+    pub median: Option<f32>,
+    /// The upper quantile of the estimates
+    pub upper: Option<f32>,
+    /// The number of reads that did not have an overlap
+    pub no_mapping_count: u32,
+}
+
 /// This trait provides methods to generate estimates and calculate the median
 /// of those estimates, both with and without considering infinite values.
 pub trait Estimate {
@@ -13,7 +24,7 @@ pub trait Estimate {
     /// # Returns
     ///
     /// A `Vec<f32>` containing the generated estimates. These estimates may be finite or infinite.
-    fn generate_estimates(&mut self) -> crate::Result<Vec<f32>>;
+    fn generate_estimates(&mut self) -> crate::Result<(Vec<f32>, u32)>;
 
     // todo add link to paper
     /// Generate an estimate of the genome size, taking the median of the per-read estimates.
@@ -43,8 +54,8 @@ pub trait Estimate {
         finite: bool,
         lower_quant: Option<f32>,
         upper_quant: Option<f32>,
-    ) -> crate::Result<(Option<f32>, Option<f32>, Option<f32>)> {
-        let estimates = self.generate_estimates()?;
+    ) -> crate::Result<EstimateResult> {
+        let (estimates, no_mapping_count) = self.generate_estimates()?;
 
         let iter: Box<dyn Iterator<Item = f32>> = if finite {
             Box::new(estimates.iter().filter(|&x| x.is_finite()).copied())
@@ -52,7 +63,14 @@ pub trait Estimate {
             Box::new(estimates.iter().copied())
         };
 
-        Ok(median(iter, lower_quant, upper_quant))
+        let (lower, median, upper) = median(iter, lower_quant, upper_quant);
+
+        Ok(EstimateResult {
+            lower,
+            median,
+            upper,
+            no_mapping_count,
+        })
     }
 }
 

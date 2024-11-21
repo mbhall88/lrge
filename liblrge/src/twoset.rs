@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel as channel;
@@ -51,6 +52,16 @@ impl TwoSetStrategy {
         let builder = Builder::default();
 
         builder.build(input)
+    }
+
+    /// The number of target reads
+    pub fn target_num_reads(&self) -> usize {
+        self.target_num_reads
+    }
+
+    /// The number of query reads
+    pub fn query_num_reads(&self) -> usize {
+        self.query_num_reads
     }
 
     fn split_fastq(&mut self) -> crate::Result<(PathBuf, PathBuf, f32)> {
@@ -141,7 +152,7 @@ impl TwoSetStrategy {
         aln_wrapper: AlignerWrapper,
         query_file: PathBuf,
         avg_target_len: f32,
-    ) -> Result<Vec<f32>, LrgeError> {
+    ) -> Result<(Vec<f32>, u32), LrgeError> {
         // Bounded channel to control memory usage - i.e., 10000 records in the channel at a time
         let (sender, receiver) = channel::bounded(10000);
         let aligner = Arc::clone(&aln_wrapper.aligner); // Shared reference for the producer thread
@@ -195,6 +206,7 @@ impl TwoSetStrategy {
 
         let estimates = Vec::with_capacity(self.query_num_reads);
         let estimates = Arc::new(Mutex::new(estimates));
+        let no_mapping_count = AtomicU32::new(0);
 
         debug!("Aligning reads and writing overlaps to PAF file...");
         // Consumer: Process records from the channel in parallel
@@ -204,7 +216,7 @@ impl TwoSetStrategy {
                 .par_bridge() // Parallelize the processing
                 .try_for_each(|record| -> Result<(), LrgeError> {
                     let io::Message::Data((rid, seq)) = record;
-                    trace!("Processing read: {:?}", String::from_utf8_lossy(&rid));
+                    trace!("Processing read: {}", String::from_utf8_lossy(&rid));
 
                     let mut qname = rid.to_owned();
                     if qname.last() != Some(&0) {
@@ -233,10 +245,11 @@ impl TwoSetStrategy {
                             }
                         }
                     } else {
-                        debug!(
-                            "No mappings found for read: {:?}",
+                        trace!(
+                            "No overlaps found for read: {}",
                             String::from_utf8_lossy(&rid)
                         );
+                        no_mapping_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
 
                     let est = per_read_estimate(
@@ -265,7 +278,18 @@ impl TwoSetStrategy {
             LrgeError::ThreadError(format!("Thread panicked when joining: {:?}", e))
         })??;
 
-        debug!("Overlaps written to: {:?}", paf_path);
+        debug!("Overlaps written to: {}", paf_path.to_string_lossy());
+
+        let no_mapping_count = no_mapping_count.load(std::sync::atomic::Ordering::Relaxed);
+        if no_mapping_count > 0 {
+            let percent = (no_mapping_count as f32 / self.query_num_reads as f32) * 100.0;
+            warn!(
+                "{} ({:.2}%) query read(s) did not overlap any target reads",
+                no_mapping_count, percent
+            );
+        } else {
+            debug!("All query reads overlapped with target reads");
+        }
 
         // we extract the estimates from the Arc and Mutex
         let estimates = Arc::try_unwrap(estimates)
@@ -279,12 +303,12 @@ impl TwoSetStrategy {
                 LrgeError::ThreadError("Error unwrapping estimates Mutex<Vec<f32>>".to_string())
             })?;
 
-        Ok(estimates)
+        Ok((estimates, no_mapping_count))
     }
 }
 
 impl Estimate for TwoSetStrategy {
-    fn generate_estimates(&mut self) -> crate::Result<Vec<f32>> {
+    fn generate_estimates(&mut self) -> crate::Result<(Vec<f32>, u32)> {
         let (target_file, query_file, avg_target_len) = self.split_fastq()?;
 
         let preset = match self.platform {
@@ -293,9 +317,8 @@ impl Estimate for TwoSetStrategy {
         };
 
         let aligner = AlignerWrapper::new(&target_file, self.threads, preset, true)?;
-        let estimates = self.align_reads(aligner, query_file, avg_target_len)?;
 
-        Ok(estimates)
+        self.align_reads(aligner, query_file, avg_target_len)
     }
 }
 

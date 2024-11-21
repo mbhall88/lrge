@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel as channel;
@@ -52,6 +53,11 @@ impl AvaStrategy {
         let builder = Builder::default();
 
         builder.build(input)
+    }
+
+    /// The number of reads being overlapped.
+    pub fn num_reads(&self) -> usize {
+        self.num_reads
     }
 
     /// Subsample the reads in the input file to `num_reads`.
@@ -127,7 +133,7 @@ impl AvaStrategy {
         aln_wrapper: AlignerWrapper,
         reads_file: PathBuf,
         sum_len: usize,
-    ) -> crate::Result<Vec<f32>> {
+    ) -> crate::Result<(Vec<f32>, u32)> {
         // Bounded channel to control memory usage - i.e., 10000 records in the channel at a time
         let (sender, receiver) = channel::bounded(25_000);
         let aligner = Arc::clone(&aln_wrapper.aligner); // Shared reference for the producer thread
@@ -203,7 +209,7 @@ impl AvaStrategy {
                 .par_bridge() // Parallelize the processing
                 .try_for_each(|record| -> Result<(), LrgeError> {
                     let io::Message::Data((rid, seq)) = record;
-                    trace!("Processing read: {:?}", String::from_utf8_lossy(&rid));
+                    trace!("Processing read: {}", String::from_utf8_lossy(&rid));
 
                     let mut qname = rid.to_owned();
                     if qname.last() != Some(&0) {
@@ -233,7 +239,8 @@ impl AvaStrategy {
                                 let tname = &mapping.target_name;
 
                                 if &rid == tname {
-                                    // Skip self-overlaps
+                                    // Skip self-overlaps. if the qname is not in the ovlap_counter, we insert it with 0 overlaps
+                                    ovlap_counter_lock.entry(rid.clone()).or_insert(0);
                                     continue;
                                 }
 
@@ -252,10 +259,6 @@ impl AvaStrategy {
                                 *ovlap_counter_lock.entry(rid.clone()).or_insert(0) += 1;
                             }
                         } else {
-                            debug!(
-                                "No mappings found for read: {:?}",
-                                String::from_utf8_lossy(&rid)
-                            );
                             // if the qname is not in the ovlap_counter, we insert it with 0 overlaps
                             ovlap_counter_lock.entry(rid.clone()).or_insert(0);
                         }
@@ -271,37 +274,59 @@ impl AvaStrategy {
             LrgeError::ThreadError(format!("Thread panicked when joining: {:?}", e))
         })??;
 
-        debug!("Overlaps written to: {:?}", paf_path);
+        debug!("Overlaps written to: {}", paf_path.to_string_lossy());
 
         let ovlap_counter = Arc::try_unwrap(ovlap_counter)
             .unwrap()
             .into_inner()
             .unwrap();
         let read_lengths = Arc::try_unwrap(read_lengths).unwrap().into_inner().unwrap();
+        let no_mapping_count = AtomicU32::new(0);
         let estimates = ovlap_counter
             .par_iter()
             .map(|(rid, n_ovlaps)| {
-                // safe to unwrap the Option here because we know the key exists
-                let read_len = read_lengths.get(rid).unwrap();
-                let avg_read_len = sum_len as f32 / (self.num_reads - 1) as f32;
-                let est = per_read_estimate(
-                    *read_len,
-                    avg_read_len,
-                    self.num_reads - 1,
-                    *n_ovlaps,
-                    overlap_threshold,
-                );
+                let est = if *n_ovlaps == 0 {
+                    no_mapping_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    trace!(
+                        "No overlaps found for read: {}",
+                        String::from_utf8_lossy(rid)
+                    );
+                    f32::INFINITY
+                } else {
+                    // safe to unwrap the Option here because we know the key exists
+                    let read_len = read_lengths.get(rid).unwrap();
+                    let avg_read_len = sum_len as f32 / (self.num_reads - 1) as f32;
+                    per_read_estimate(
+                        *read_len,
+                        avg_read_len,
+                        self.num_reads - 1,
+                        *n_ovlaps,
+                        overlap_threshold,
+                    )
+                };
                 trace!("Estimate for {}: {}", String::from_utf8_lossy(rid), est);
                 est
             })
             .collect();
 
-        Ok(estimates)
+        let no_mapping_count = no_mapping_count.load(std::sync::atomic::Ordering::Relaxed);
+
+        if no_mapping_count > 0 {
+            let percent = (no_mapping_count as f32 / self.num_reads as f32) * 100.0;
+            warn!(
+                "{} ({:.2}%) read(s) did not overlap any other reads",
+                no_mapping_count, percent
+            );
+        } else {
+            debug!("All reads had at least one overlap");
+        }
+
+        Ok((estimates, no_mapping_count))
     }
 }
 
 impl Estimate for AvaStrategy {
-    fn generate_estimates(&mut self) -> crate::Result<Vec<f32>> {
+    fn generate_estimates(&mut self) -> crate::Result<(Vec<f32>, u32)> {
         let (reads_file, sum_len) = self.subsample_reads()?;
 
         let preset = match self.platform {
@@ -310,8 +335,7 @@ impl Estimate for AvaStrategy {
         };
 
         let aligner = AlignerWrapper::new(&reads_file, self.threads, preset, false)?;
-        let estimates = self.align_reads(aligner, reads_file, sum_len)?;
 
-        Ok(estimates)
+        self.align_reads(aligner, reads_file, sum_len)
     }
 }
