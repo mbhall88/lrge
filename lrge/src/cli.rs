@@ -56,6 +56,14 @@ pub struct Args {
     #[arg(short = 'f', long = "float-my-boat", hide_short_help = true)]
     pub precise: bool,
 
+    /// The lower quantile to use for the estimate
+    #[arg(long = "q1", value_name = "FLOAT", default_value_t = liblrge::estimate::LOWER_QUANTILE, value_parser = validate_low_quantile, hide_short_help = true)]
+    pub lower_q: f32,
+
+    /// The upper quantile to use for the estimate
+    #[arg(long = "q3", value_name = "FLOAT", default_value_t = liblrge::estimate::UPPER_QUANTILE, value_parser = validate_high_quantile, hide_short_help = true)]
+    pub upper_q: f32,
+
     /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
     #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]
     pub quiet: u8,
@@ -75,6 +83,31 @@ fn check_path_exists<S: AsRef<OsStr> + ?Sized>(s: &S) -> Result<PathBuf, String>
     }
 }
 
+/// A generic value parser to ensure the value is within the specified range
+fn validate_quantile(s: &str, min: f32, max: f32) -> Result<f32, String> {
+    let value: f32 = s
+        .parse()
+        .map_err(|_| format!("`{}` is not a valid number", s))?;
+    if value > min && value < max {
+        Ok(value)
+    } else {
+        Err(format!(
+            "Value `{}` must be greater than {} and less than {}",
+            s, min, max
+        ))
+    }
+}
+
+/// A value parser for the lower quantile
+fn validate_low_quantile(s: &str) -> Result<f32, String> {
+    validate_quantile(s, 0.0, 0.5)
+}
+
+/// A value parser for the upper quantile
+fn validate_high_quantile(s: &str) -> Result<f32, String> {
+    validate_quantile(s, 0.5, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +123,17 @@ mod tests {
         let actual = check_path_exists(OsStr::new("Cargo.toml")).unwrap();
         let expected = PathBuf::from("Cargo.toml");
         assert_eq!(actual, expected)
+    }
+
+    #[test]
+    fn test_validate_quantile() {
+        assert!(validate_quantile("0.1", 0.0, 0.5).is_ok());
+        assert!(validate_quantile("0.5", 0.0, 0.5).is_err());
+        assert!(validate_quantile("0", 0.0, 0.5).is_err());
+        assert!(validate_quantile("-0.1", 0.0, 0.5).is_err());
+        assert!(validate_quantile("abc", 0.0, 0.5).is_err());
+        assert!(validate_quantile("0.6", 0.5, 1.0).is_ok());
+        assert!(validate_quantile("1.0", 0.5, 1.0).is_err());
     }
 
     #[test]

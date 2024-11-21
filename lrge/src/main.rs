@@ -74,17 +74,20 @@ fn main() -> Result<()> {
         unreachable!("No strategy could be determined. Please raise an issue at <https://github.com/mbhall88/lrge/issues>")
     };
 
-    let estimate = if args.with_infinity {
-        strategy.estimate_with_infinity()
-    } else {
-        strategy.estimate()
-    }
-    .context("Failed to generate estimate")?;
+    let (low_q, estimate, upper_q) = strategy
+        .estimate(!args.with_infinity, Some(args.lower_q), Some(args.upper_q))
+        .context("Failed to generate estimate")?;
 
     match estimate {
         Some(est) => {
             let formatted_est = format_estimate(est);
-            info!("Estimated genome size: {formatted_est}");
+            let mut msg = format!("Estimated genome size: {formatted_est}");
+            if let (Some(low), Some(high)) = (low_q, upper_q) {
+                let formatted_low = format_estimate(low);
+                let formatted_high = format_estimate(high);
+                msg.push_str(&format!(" (IQR: {formatted_low} - {formatted_high})"));
+            }
+            info!("{}", msg);
 
             if args.precise {
                 writeln!(output, "{est}")?;
