@@ -3,6 +3,9 @@ use anyhow::{bail, Context, Result};
 use clap::Parser;
 use liblrge::Estimate;
 use log::{debug, info, LevelFilter};
+use std::fs::File;
+use std::io;
+use std::io::Write;
 
 mod cli;
 mod utils;
@@ -36,6 +39,12 @@ fn main() -> Result<()> {
     } else {
         debug!("Created temporary directory at {:?}", tmpdir.path());
     }
+
+    let mut output: Box<dyn Write> = if args.output == "-" {
+        Box::new(io::stdout())
+    } else {
+        Box::new(File::create(&args.output).context("Failed to create output file")?)
+    };
 
     let mut strategy: Box<dyn Estimate> = if let Some(num) = args.num_reads {
         info!("Running all-vs-all strategy with {} reads", num);
@@ -78,9 +87,9 @@ fn main() -> Result<()> {
             info!("Estimated genome size: {formatted_est}");
 
             if args.precise {
-                println!("{est}");
+                writeln!(output, "{est}")?;
             } else {
-                println!("{est:.0}");
+                writeln!(output, "{est:.0}")?;
             }
         }
         None => {

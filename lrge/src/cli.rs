@@ -12,6 +12,10 @@ pub struct Args {
     #[arg(name = "INPUT", value_parser = check_path_exists)]
     pub input: PathBuf,
 
+    /// Output file for the estimate
+    #[arg(short, long, value_name = "OUTPUT", default_value = "-")]
+    pub output: String,
+
     /// Target number of reads to use (for two-set strategy; default)
     #[arg(short = 'T', long = "target", value_name = "INT", default_value_if("num_reads", ArgPredicate::IsPresent, None), default_value = TARGET_NUM_READS)]
     pub target_num_reads: Option<usize>,
