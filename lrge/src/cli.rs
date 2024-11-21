@@ -33,7 +33,7 @@ pub struct Args {
     pub platform: String,
 
     /// Number of threads to use
-    #[arg(short = 't', value_name = "INT", default_value = "1")]
+    #[arg(short, long, value_name = "INT", default_value = "1")]
     pub threads: usize,
 
     /// Don't clean up temporary files
