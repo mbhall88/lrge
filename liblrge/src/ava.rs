@@ -215,7 +215,7 @@ impl AvaStrategy {
                     let mappings = aligner.map(&seq, Some(&qname)).map_err(|e| {
                         LrgeError::MapError(format!(
                             "Error mapping read {}: {}",
-                            String::from_utf8_lossy(&qname),
+                            String::from_utf8_lossy(&rid),
                             e
                         ))
                     })?;
@@ -254,7 +254,7 @@ impl AvaStrategy {
                         } else {
                             debug!(
                                 "No mappings found for read: {:?}",
-                                String::from_utf8_lossy(&qname)
+                                String::from_utf8_lossy(&rid)
                             );
                             // if the qname is not in the ovlap_counter, we insert it with 0 overlaps
                             ovlap_counter_lock.entry(rid.clone()).or_insert(0);
@@ -284,13 +284,15 @@ impl AvaStrategy {
                 // safe to unwrap the Option here because we know the key exists
                 let read_len = read_lengths.get(rid).unwrap();
                 let avg_read_len = sum_len as f32 / (self.num_reads - 1) as f32;
-                per_read_estimate(
+                let est = per_read_estimate(
                     *read_len,
                     avg_read_len,
                     self.num_reads - 1,
                     *n_ovlaps,
                     overlap_threshold,
-                )
+                );
+                trace!("Estimate for {}: {}", String::from_utf8_lossy(rid), est);
+                est
             })
             .collect();
 

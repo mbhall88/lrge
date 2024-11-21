@@ -247,7 +247,7 @@ impl TwoSetStrategy {
                         overlap_threshold,
                     );
 
-                    trace!("Estimate for {}: {}", String::from_utf8_lossy(&qname), est);
+                    trace!("Estimate for {}: {}", String::from_utf8_lossy(&rid), est);
 
                     {
                         // Lock the estimates vector and push the estimate
