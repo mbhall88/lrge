@@ -1,0 +1,11 @@
+# adapted from https://github.com/jonhoo/rust-ci-conf/blob/fabb82abd53e0052c8b70ae197a80e6203ede26d/.github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: daily
