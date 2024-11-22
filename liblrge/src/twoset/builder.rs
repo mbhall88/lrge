@@ -16,10 +16,11 @@ pub struct Builder {
 
 impl Default for Builder {
     fn default() -> Self {
+        let tmpdir = std::env::temp_dir();
         Self {
             target_num_reads: DEFAULT_TARGET_NUM_READS,
             query_num_reads: DEFAULT_QUERY_NUM_READS,
-            tmpdir: env!("TMPDIR").into(),
+            tmpdir,
             threads: 1,
             seed: None,
             platform: Platform::default(),
