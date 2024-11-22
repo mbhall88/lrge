@@ -41,9 +41,13 @@ fn detect_compression_format<R: Read + Seek>(reader: &mut R) -> io::Result<Compr
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     let format = match magic {
+        #[cfg(feature = "gzip")]
         [0x1f, 0x8b, ..] => CompressionFormat::Gzip,
+        #[cfg(feature = "bzip2")]
         [0x42, 0x5a, ..] => CompressionFormat::Bzip2,
+        #[cfg(feature = "zstd")]
         [0x28, 0xb5, 0x2f, 0xfd, ..] => CompressionFormat::Zstd,
+        #[cfg(feature = "xz")]
         [0xfd, 0x37, 0x7a, 0x58, 0x5a] => CompressionFormat::Xz,
         _ => CompressionFormat::None,
     };
