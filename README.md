@@ -339,9 +339,9 @@ For a full description of the method, see the [paper][doi].
 ### Two-set strategy
 
 The two-set strategy is the default method used by LRGE. It involves randomly selecting a two distinct subsets of reads 
-from the input. One subset is deemed the target set ($T$) and the other the query set ($Q$). Each read $q_i$ in $Q$ is overlapped 
-against $T$ and a genome size ($\textbf{GS}$) estimate is generated for that read ($\textbf{GS}_{T,q_i}$). The estimate is calculated based on 
-the number of overlaps of $q_i$ with reads in $T$ ($O_{T,q_i}$), according to the formula:
+from the input. One subset is deemed the target set ($T$) and the other the query set ($Q$). Each read $`q_i`$ in $Q$ is overlapped 
+against $T$ and a genome size ($\textbf{GS}$) estimate is generated for that read ($`\textbf{GS}_{T,q_i}`$). The estimate is calculated based on 
+the number of overlaps of $`q_i`$ with reads in $T$ ($`O_{T,q_i}`$), according to the formula:
 
 ```math
 \textbf{GS}_{T,q_i} \approx \frac{\vert T \vert \cdot \vert q_i \vert + \overline{t \in T} - 2 \cdot \textbf{OT}}{O_{T,q_i}}
