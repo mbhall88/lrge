@@ -91,7 +91,7 @@ conda install -c bioconda lrge
 ![Crates.io Total Downloads](https://img.shields.io/crates/d/lrge)
 
 ```sh
-cargo install --locked lrge
+cargo install lrge
 ```
 
 ### Container
@@ -232,7 +232,7 @@ If you don't want the estimate to be rounded to the nearest integer 🤓
 $ lrge --float-my-boat reads.fq
 ```
 
-In [the paper][doi], we suggest using the 15th and 65th percentiles of the estimates to get a 92% confidence interval. 
+In [the paper][doi], we suggest using the 15th and 65th percentiles of the estimates to get a ~92% confidence interval. 
 However, you can change these
 
 ```
@@ -344,10 +344,10 @@ against $T$ and a genome size ($\textbf{GS}$) estimate is generated for that rea
 the number of overlaps of $q_i$ with reads in $T$ ($O_{T,q_i}$), according to the formula:
 
 ```math
-\textbf{GS}_{T,q_i} \approx \frac{\size{T} \cdot \size{q_i} + \overline{t \in T} - 2 \cdot \textbf{OT}}{O_{T,q_i}}
+\textbf{GS}_{T,q_i} \approx \frac{\vert T \vert \cdot \vert q_i \vert + \overline{t \in T} - 2 \cdot \textbf{OT}}{O_{T,q_i}}
 ```
 
-where $\size{T}$ is the total size of the target set, $\size{q_i}$ is the length of read $q_i$, $\overline{t \in T}$ is 
+where $\vert T \vert$ is the total size of the target set, $\vert q_i \vert$ is the length of read $q_i$, $\overline{t \in T}$ is 
 the average length of reads in $T$, and $\textbf{OT}$ is the overlap threshold (minimum chain score in minimap2, which 
 defaults to 100 for overlaps). See the paper for more formal/rigorous definitions.
 
@@ -361,7 +361,7 @@ the estimate all that much.
 ### All-vs-all strategy
 
 The all-vs-all strategy involves overlapping some random subset (`-n`) of reads in the input against each other. The 
-genome size estimate for each read is calculated as above, but we subtract one from $\size{T}$ to account for the fact 
+genome size estimate for each read is calculated as above, but we subtract one from $\vert T \vert$ to account for the fact 
 that the read is not being overlapped against itself. We also do not factor the length of the read whose size is being 
 estimated into the average read length calculation.
 

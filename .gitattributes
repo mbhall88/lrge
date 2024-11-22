@@ -1,1 +1,3 @@
 paper/** linguist-vendored
+install/** linguist-vendored
+justfile linguist-vendored
