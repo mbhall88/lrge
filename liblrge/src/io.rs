@@ -16,11 +16,15 @@ use zstd::stream::read::Decoder as ZstdDecoder;
 /// The compression format of a file.
 #[derive(Debug, PartialEq, Copy, Clone, Default)]
 enum CompressionFormat {
+    #[cfg(feature = "bzip2")]
     Bzip2,
+    #[cfg(feature = "gzip")]
     Gzip,
     #[default]
     None,
+    #[cfg(feature = "xz")]
     Xz,
+    #[cfg(feature = "zstd")]
     Zstd,
 }
 
