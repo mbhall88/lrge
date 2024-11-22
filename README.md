@@ -349,7 +349,7 @@ the number of overlaps of $`q_i`$ with reads in $T$ ($`O_{T,q_i}`$), according t
 
 where $\vert T \vert$ is the total size of the target set, $\vert q_i \vert$ is the length of read $q_i$, $\overline{t \in T}$ is 
 the average length of reads in $T$, and $\textbf{OT}$ is the overlap threshold (minimum chain score in minimap2, which 
-defaults to 100 for overlaps). See the paper for more formal/rigorous definitions.
+defaults to 100 for overlaps). See [the paper][doi] for more formal/rigorous definitions.
 
 Ultimately, the genome size estimate is the median of the finite estimates for each read in $Q$.
 
@@ -370,19 +370,25 @@ we did not find the difference to be statistically significant in our tests.
 
 ## Results
 
-The full results are available in the [paper][doi]. Here is a brief summary of how LRGE compares to other methods.
+We compared LRGE to three other methods: GenomeScope2, Mash, and Raven ([see below](#alternatives) for more info). We ran 
+each method on 3370 read sets from PacBio or ONT data. Each of these samples is associated with a RefSeq assembly, so the 
+true size was taken as the size of the RefSeq assembly. You can find the metadata for the samples [here](./paper/config/bacteria_lr_runs.filtered.tsv).
+
+The full results are available in the [paper][doi] and [here](./paper/results/estimates/estimates.tsv). Here is a brief summary of how LRGE compares to other methods.
 
 ![Results](./paper/results/figures/method_absolute_relative_error.png)
 
-This compares the absolute relative error as a percentage. The absolute relative error ($\epsilon_{\text{rel}}$) is calculated as:
+This compares the absolute relative error as a percentage. The relative error ($\epsilon_{\text{rel}}$) is calculated as:
 
 ```math
-    \epsilon_{rel} = \frac{\hat{G} - G}{G} \times 100
+    \epsilon_{\text{rel}} = \frac{\hat{G} - G}{G} \cdot 100
 ```
 
-where $G$ is the true genome size, and $\hat{G}$ is the estimated genome size. For example, a $\epsilon_{rel}$ of 50% 
-is out (higher or lower) by 50% of the true genome size. So if the true genome size is 1 Mbp, a $\epsilon_{rel}$ of 50% 
-would be 1.5 Mbp or 0.5 Mbp. The following figure shows the relative error (non-absolute) for the same methods to give an 
+where $G$ is the true genome size, and $\hat{G}$ is the estimated genome size. For example, a $\epsilon_{\text{rel}}$ of 50% 
+is out (higher or lower) by 50% of the true genome size. So if the true genome size is 1 Mbp, a $\epsilon_{\text{rel}}$ of 50% 
+would be 1.5 Mbp or 0.5 Mbp. 
+
+The following figure shows the (non-absolute) relative error for the same methods to give an 
 indication of which methods tend to over or underestimate.
 
 ![Results](./paper/results/figures/platform_relative_error.png)
@@ -396,6 +402,22 @@ For the full details of the methods benchmarked, see the [paper][doi]. However, 
 
 The statistical annotations above the violins are coloured by the method which has the lowest mean value for the given 
 metric.
+
+## Alternatives
+
+The methods we compare against are:
+
+[GenomeScope2](https://github.com/tbenavi1/genomescope2.0): to get estimates from GenomeScope2, you need to first generate 
+a k-mer spectrum. We used [KMC](https://github.com/refresh-bio/KMC) for this. You can find a Python script that takes reads 
+and generates a k-mer spectrum in [`genomescope.py`](./paper/workflow/scripts/genomescope.py). The list of parameters used 
+can also be found in the [workflow config](./paper/config/config.yaml).
+
+[Mash](https://github.com/marbl/Mash): we used `mash sketch` on the reads, which prints out the estimated genome size in 
+the logging output. You can find the options used in the [workflow config](./paper/config/config.yaml).
+
+[Raven](https://github.com/lbcb-sci/raven): Raven essentially just assembles the reads - *REALLLLY* fast 🚀
+
+You can find the full details of how we compared methods in the [workflow](./paper/workflow/rules/estimate.smk).
 
 ## Citation
 
