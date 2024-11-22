@@ -359,6 +359,7 @@ dependencies = [
  "bzip2",
  "crossbeam-channel",
  "csv",
+ "env_logger",
  "flate2",
  "libc",
  "liblzma",

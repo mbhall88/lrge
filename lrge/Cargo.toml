@@ -11,6 +11,7 @@ readme.workspace = true
 keywords.workspace = true
 license-file.workspace = true
 exclude.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 log.workspace = true

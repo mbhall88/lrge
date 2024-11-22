@@ -85,7 +85,7 @@ fn main() -> Result<()> {
         .estimate(!args.with_infinity, Some(args.lower_q), Some(args.upper_q))
         .context("Failed to generate estimate")?;
 
-    let estimate = est_result.median;
+    let estimate = est_result.estimate;
     let low_q = est_result.lower;
     let upper_q = est_result.upper;
 

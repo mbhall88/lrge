@@ -9,7 +9,7 @@ pub struct EstimateResult {
     /// The lower quantile of the estimates
     pub lower: Option<f32>,
     /// The median of the estimates - this is the genome size estimate
-    pub median: Option<f32>,
+    pub estimate: Option<f32>,
     /// The upper quantile of the estimates
     pub upper: Option<f32>,
     /// The number of reads that did not have an overlap
@@ -34,9 +34,9 @@ pub trait Estimate {
     /// * `finite`: Whether to consider only finite estimates. We found setting this to `true` gave
     ///   more accurate results (see the paper).
     /// * `lower_quant`: The lower percentile to calculate. If `None`, this will not be calculated.
-    ///   This value should be between 0 and 1. So, for the 25th percentile, you would pass `0.25`.
+    ///   This value should be between 0 and 0.5. So, for the 25th percentile, you would pass `0.25`.
     /// * `upper_quant`: The upper percentile to calculate. If `None`, this will not be calculated.
-    ///   This value should be between 0 and 1. So, for the 75th percentile, you would pass `0.75`.
+    ///   This value should be between 0.5 and 1.0. So, for the 75th percentile, you would pass `0.75`.
     ///
     /// In our analysis, we found that the 15th and 65th percentiles gave the highest confidence (~92%).
     /// If you want to use our most current recommended values, you can use the constants [`LOWER_QUANTILE`]
@@ -44,11 +44,13 @@ pub trait Estimate {
     ///
     /// # Returns
     ///
-    /// A tuple containing the lower percentile (if requested), median, and upper percentile (if
-    /// requested) of the estimates - in that order.
+    /// An [`EstimateResult`] containing the lower, median, and upper estimates, as well as the number
+    /// of reads that did not have an overlap. This number can be important for quality control. For
+    /// examples, if you have a high number of reads that did not overlap, you may want to investigate
+    /// why that is (e.g., contamination, poor quality reads, etc.).
     ///
-    /// Will return `None` if there are no finite estimates when `finite` is `true`. Will also return
-    /// `None` if there are no estimates at all.
+    /// The estimate will be `None` if there are no finite estimates when `finite` is `true`, or if
+    /// there are no estimates at all.
     fn estimate(
         &mut self,
         finite: bool,
@@ -67,7 +69,7 @@ pub trait Estimate {
 
         Ok(EstimateResult {
             lower,
-            median,
+            estimate: median,
             upper,
             no_mapping_count,
         })

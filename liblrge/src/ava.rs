@@ -1,7 +1,40 @@
 //! A strategy that compares overlaps between the same set of reads - i.e., all-vs-all.
 //!
-//! In general, this strategy is less computationally efficient than [`TwoSetStrategy`], but it
+//! In general, this strategy is less computationally efficient than [`TwoSetStrategy`][crate::TwoSetStrategy], but it
 //! is slightly more accurate - though that difference in accuracy is not statistically significant.
+//!
+//! # Examples
+//!
+//! You probably want to use the [`Builder`] interface to customise the strategy.
+//!
+//! ```no_run
+//! use liblrge::{Estimate, AvaStrategy};
+//! use liblrge::estimate::{LOWER_QUANTILE, UPPER_QUANTILE};
+//! use liblrge::ava::{Builder, DEFAULT_AVA_NUM_READS};
+//!
+//! let input = "path/to/reads.fastq";
+//! let mut strategy = Builder::new()
+//!    .num_reads(DEFAULT_AVA_NUM_READS)
+//!    .threads(4)
+//!    .seed(Some(42))  // makes the estimate reproducible
+//!    .build(input);
+//!
+//! let finite = true;  // estimate the genome size based on the finite estimates (recommended)
+//! let low_q = Some(LOWER_QUANTILE);   // lower quantile for the confidence interval
+//! let upper_q = Some(UPPER_QUANTILE); // upper quantile for the confidence interval
+//! let est_result = strategy.estimate(finite, low_q, upper_q).expect("Failed to generate estimate");
+//! let estimate = est_result.estimate;
+//!
+//! let no_mapping_count = est_result.no_mapping_count;
+//! // you might want to handle cases where some proportion of query reads did not overlap with target reads
+//! ```
+//!
+//! By default, the intermediate reads and overlap files are written to a temporary directory and
+//! cleaned up after the strategy object is dropped. This is done via the use of the [`tempfile`](https://crates.io/crates/tempfile) crate.
+//! The intermediate reads file will be placed inside the temporary directory and names `reads.fq`,
+//! while the overlap file will be named `overlaps.paf`.
+//!
+//! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
 mod builder;
 
 use std::collections::{HashMap, HashSet};
@@ -23,6 +56,7 @@ use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
 use crate::{io, unique_random_set, Estimate, Platform};
 
+/// The default number of reads to use in the all-vs-all strategy.
 pub const DEFAULT_AVA_NUM_READS: usize = 25_000;
 
 /// A strategy that compares overlaps between two sets of reads.
@@ -30,6 +64,8 @@ pub const DEFAULT_AVA_NUM_READS: usize = 25_000;
 /// The convention is to use a smaller set of query reads and a larger set of target reads. The
 /// query reads are overlapped with the target reads and an estimated genome size is calculated
 /// for **each query read** based on the number of overlaps it has with the target set.
+///
+/// See the [module-level documentation](crate::ava) for more information and examples.
 pub struct AvaStrategy {
     /// Path to the FASTQ file.
     input: PathBuf,

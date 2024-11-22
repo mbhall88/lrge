@@ -3,6 +3,59 @@
 //! `liblrge` is a Rust library that provides utilities for estimating genome size for a given set
 //! of reads.
 //!
+//! You can find a command-line interface (CLI) tool that uses this library in the [`lrge`][lrge] crate.
+//!
+//! [lrge]: https://crates.io/crates/lrge
+//!
+//! ## Usage
+//!
+//! The library provides two strategies for estimating genome size:
+//!
+//! ### [`TwoSetStrategy`]
+//!
+//! The two-set strategy uses two (random) sets of reads to estimate the genome size. The query set, which is
+//! generally smaller, is overlapped against a target set of reads. A genome size estimate is generated
+//! for each read in the query set, based on the number of overlaps and the average read length.
+//! The median of these estimates is taken as the final genome size estimate.
+//!
+//! ```no_run
+//! use liblrge::{Estimate, TwoSetStrategy};
+//! use liblrge::twoset::{Builder, DEFAULT_TARGET_NUM_READS, DEFAULT_QUERY_NUM_READS};
+//!
+//! let input = "path/to/reads.fastq";
+//! let mut strategy = Builder::new()
+//!    .target_num_reads(DEFAULT_TARGET_NUM_READS)
+//!    .query_num_reads(DEFAULT_QUERY_NUM_READS)
+//!    .threads(4)
+//!    .build(input);
+//!
+//! let est_result = strategy.estimate(false, None, None).expect("Failed to generate estimate");
+//! let estimate = est_result.estimate;
+//! // do something with the estimate
+//! ```
+//!
+//! ### [`AvaStrategy`]
+//!
+//! The all-vs-all (ava) strategy takes a (random) set of reads and overlaps it against itself to
+//! estimate the genome size. The genome size estimate is generated for each read in the set, based on the
+//! number of overlaps and the average read length - minus the read being assessed. The median of these
+//! estimates is taken as the final genome size estimate.
+//!
+//! ```no_run
+//! use liblrge::{Estimate, AvaStrategy};
+//! use liblrge::ava::{Builder, DEFAULT_AVA_NUM_READS};
+//!
+//! let input = "path/to/reads.fastq";
+//! let mut strategy = Builder::new()
+//!    .num_reads(DEFAULT_AVA_NUM_READS)
+//!   .threads(4)
+//!   .build(input);
+//!
+//! let est_result = strategy.estimate(false, None, None).expect("Failed to generate estimate");
+//! let estimate = est_result.estimate;
+//! // do something with the estimate
+//! ```
+//!
 //! ## Features
 //!
 //! This library includes optional support for compressed file formats, controlled by feature flags.
@@ -48,9 +101,31 @@
 //! [xz]: https://crates.io/liblzma
 //! [bzip2]: https://crates.io/crates/bzip2
 //! [magic]: https://en.wikipedia.org/wiki/Magic_number_(programming)#In_files
+//!
+//! ## Disabling logging
+//!
+//! `liblrge` will output some logging information via the [`log`][log] crate. If you wish to
+//! suppress this logging you can configure the logging level in your application. For example, using
+//! the [`env_logger`][env_logger] crate you can do the following:
+//!
+//! ```
+//! use log::LevelFilter;
+//!
+//! let mut log_builder = env_logger::Builder::new();
+//! log_builder
+//!     .filter(None, LevelFilter::Info)
+//!     .filter_module("liblrge", LevelFilter::Off);
+//! log_builder.init();
+//!
+//! // Your application code here
+//! ```
+//!
+//! This will set the global logging level to `Info` and disable all logging from the `liblrge` library.
+//!
+//! [log]: https://crates.io/crates/log
+//! [env_logger]: https://crates.io/crates/env_logger
 // todo add link to paper
-// todo add library denies such as #![deny(missing_docs)]
-// todo add info on how to suppress logging
+#[deny(missing_docs)]
 pub mod ava;
 pub mod error;
 pub mod estimate;
@@ -66,7 +141,7 @@ pub use self::estimate::Estimate;
 pub use self::twoset::TwoSetStrategy;
 use std::str::FromStr;
 
-/// A type alias for `Result` with [`LrgeError`] as the error type.
+/// A type alias for `Result` with [`LrgeError`][crate::error::LrgeError] as the error type.
 pub type Result<T> = std::result::Result<T, error::LrgeError>;
 
 /// The sequencing platform used to generate the reads.

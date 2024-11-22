@@ -15,6 +15,7 @@ readme = "README.md"
 keywords = ["bioinformatics", "long-reads", "overlaps", "estimation", "genome-size"]
 license-file = "LICENSE"
 exclude = ["paper/*"]
+rust-version = "1.74.1"
 
 [workspace.dependencies]
 log = "0.4.22"
