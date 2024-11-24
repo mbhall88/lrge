@@ -1,27 +1,37 @@
 def lrge_opts(wildcards):
-    opts = ""
+    opts = ["-v"]
+
+    seed = config["lrge"].get("seed")
+    if seed is not None:
+        opts.extend(["-s", f"{seed}"])
+
     if wildcards.strategy == "ava":
-        opts = "-n 25000 -s rand -vv"
+        num = config["lrge"]["ava"]
+        opts.extend(["-n", f"{num}"])
     elif wildcards.strategy == "2set":
-        opts = "-L 5000 -O 10000 -r -v"
+        target = config["lrge"]["twoset"]["target"]
+        query = config["lrge"]["twoset"]["query"]
+        opts.extend(["-T", f"{target}", "-Q", f"{query}"])
     else:
         raise UnimplementedError(f"Unknown strategy: {wildcards.strategy}")
 
     platform = samplesheet.loc[wildcards.run, "Instrument Platform"]
     if "OXFORD" in platform:
-        opts += " -P ont"
+        platform = "ont"
     elif "PACBIO" in platform:
-        opts += " -P pb"
+        platform = "pb"
     else:
         raise UnimplementedError(f"Unknown platform: {platform}")
 
-    return opts
+    opts.extend(["-P", platform])
+
+    return " ".join(opts)
 
 
 rule estimate_lrge:
     input:
         fastq=rules.download.output.fastq,
-        script=SCRIPTS / "lrge-{strategy}.py",
+        bin=WORKFLOW / config["lrge"]["bin"],
     output:
         size=RESULTS / "estimates/lrge-{strategy}/{dir1}/{dir2}/{dir3}/{run}/{run}.size",
     log:
@@ -33,15 +43,13 @@ rule estimate_lrge:
     threads: 4
     resources:
         mem_mb=lambda wildcards, attempt: (4**attempt) * 1_000,
-        runtime=lambda wildcards, attempt: f"{attempt}h",
-    conda:
-        ENVS / "lrge.yaml"
+        runtime=lambda wildcards, attempt: f"{attempt*2}h",
     shadow:
         "shallow"
     params:
         opts=lrge_opts,
     shell:
-        "python {input.script} -t {threads} {params.opts} {input.fastq} > {output.size} 2> {log}"
+        "{input.bin} -t {threads} {params.opts} -o {output.size} {input.fastq} 2> {log}"
 
 
 rule estimate_mash:

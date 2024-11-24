@@ -7,6 +7,15 @@ download:
   min_bases: 27000000  # 27Mbp, which is about 2x depth on the largest genome
   seed: 324
 
+# parameters for LRGE
+lrge:
+  seed: 4556
+  ava: 25000
+  twoset: 
+    target: 10000
+    query: 5000
+  bin: ../../target/release/lrge
+
 # parameters for mash
 mash:
   sketch_size: 100000
