@@ -3,7 +3,7 @@
 [![check](https://github.com/mbhall88/lrge/actions/workflows/check.yml/badge.svg)](https://github.com/mbhall88/lrge/actions/workflows/check.yml)
 [![test](https://github.com/mbhall88/lrge/actions/workflows/test.yml/badge.svg)](https://github.com/mbhall88/lrge/actions/workflows/test.yml)
 
-**L**ong **R**ead overlap **G**enome size **E**stimation
+**L**ong **R**ead-based **G**enome size **E**stimation from overlaps
 
 LRGE (pronounced "large") is a command line tool for estimating genome size from long read overlaps. The tool is built 
 on top of the [`liblrge`][liblrge] Rust library, which is also available as a standalone library for use in other projects.
@@ -165,6 +165,11 @@ $ cat size.txt
 By default, LRGE uses the [two-set strategy](#two-set-strategy) with 10,000 target reads (`-T`) and 5,000 query reads 
 (`-Q`). You can use the [all-vs-all strategy](#all-vs-all-strategy) by specifying the number of reads to use with the `-n` flag.
 
+### Library
+
+You can also use the `liblrge` library in your Rust projects. This allows you to estimate genome size within your own 
+applications - without needing to call out to `lrge`. For more details on how to use the library, see the [documentation](https://www.docs.rs/liblrge) or the 
+[source code](./liblrge).
 
 ### Standard options
 
