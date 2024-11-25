@@ -15,8 +15,7 @@ NO_COLOR="$(tput sgr0 2>/dev/null || printf '')"
 PROJECT="lrge"
 GH_USER="mbhall88"
 
-SUPPORTED_TARGETS="x86_64-unknown-linux-musl x86_64-unknown-linux-gnu \
-                   aarch64-unknown-linux-musl i686-unknown-linux-musl \
+SUPPORTED_TARGETS="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
                    aarch64-apple-darwin x86_64-apple-darwin"
 
 info() {

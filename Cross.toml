@@ -16,24 +16,6 @@ pre-build = [
     "apt-get update && apt-get install -y zlib1g-dev:$CROSS_DEB_ARCH",
 ]
 
-[target.aarch64-unknown-linux-musl]
-# Additional commands to run prior to building the package.
-# These override the commands present in `[build]`: they
-# will not merge.
-pre-build = [
-    "dpkg --add-architecture $CROSS_DEB_ARCH",
-    "apt-get update && apt-get install -y musl-tools musl-dev zlib1g-dev:$CROSS_DEB_ARCH",
-]
-
-[target.x86_64-unknown-linux-musl]
-# Additional commands to run prior to building the package.
-# These override the commands present in `[build]`: they
-# will not merge.
-pre-build = [
-    "dpkg --add-architecture $CROSS_DEB_ARCH",
-    "apt-get update && apt-get install -y musl-tools musl-dev zlib1g-dev:$CROSS_DEB_ARCH",
-]
-
 [target.x86_64-apple-darwin]
 # Additional commands to run prior to building the package.
 # These override the commands present in `[build]`: they
