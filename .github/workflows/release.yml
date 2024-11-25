@@ -4,7 +4,7 @@ name: Release
 on:
   push:
     tags:
-      - "[0-9]+.[0-9]+.[0-9]+"
+      - "lrge-[0-9]+.[0-9]+.[0-9]+"
 
 env:
   CICD_INTERMEDIATES_DIR: "_release-intermediates"
@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           echo "PROJECT_NAME=lrge" >> $GITHUB_ENV
-          echo "PROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)" >> $GITHUB_ENV
+          echo "PROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' lrge/Cargo.toml | head -n1)" >> $GITHUB_ENV
           echo "PROJECT_MAINTAINER=$(sed -n 's/^authors = \["\(.*\)"\]/\1/p' Cargo.toml)" >> $GITHUB_ENV
           echo "PROJECT_HOMEPAGE=$(sed -n 's/^homepage = "\(.*\)"/\1/p' Cargo.toml)" >> $GITHUB_ENV
 
@@ -116,7 +116,7 @@ jobs:
         id: is-release
         shell: bash
         run: |
-          unset IS_RELEASE ; if [[ $GITHUB_REF =~ ^refs/tags/[0-9].* ]]; then IS_RELEASE='true' ; fi
+          unset IS_RELEASE ; if [[ $GITHUB_REF =~ ^refs/tags/lrge-[0-9].* ]]; then IS_RELEASE='true' ; fi
           echo "IS_RELEASE=${IS_RELEASE}" >> $GITHUB_OUTPUT
 
       - name: Publish archives and packages
