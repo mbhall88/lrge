@@ -27,6 +27,9 @@ pub enum LrgeError {
 
     /// Error mapping a read
     MapError(String),
+
+    /// Duplicate read identifiers were found.
+    DuplicateReadIdentifier(String),
 }
 
 impl fmt::Display for LrgeError {
@@ -40,6 +43,9 @@ impl fmt::Display for LrgeError {
             LrgeError::ThreadError(msg) => write!(f, "Error relating to threads: {}", msg),
             LrgeError::PafWriteError(msg) => write!(f, "Error writing PAF file: {}", msg),
             LrgeError::MapError(msg) => write!(f, "Error mapping a read: {}", msg),
+            LrgeError::DuplicateReadIdentifier(id) => {
+                write!(f, "Duplicate read identifier found: {}", id)
+            }
         }
     }
 }

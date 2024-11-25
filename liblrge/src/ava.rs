@@ -194,7 +194,11 @@ impl AvaStrategy {
                         {
                             // Lock the read_lengths map and insert the read length
                             let mut read_lengths_lock = read_lengths.lock().unwrap();
-                            read_lengths_lock.insert(rid, rec.num_bases());
+                            if read_lengths_lock.insert(rid, rec.num_bases()).is_some() {
+                                return Err(LrgeError::DuplicateReadIdentifier(
+                                    String::from_utf8_lossy(rec.read_id()).to_string(),
+                                ));
+                            }
                         }
 
                         if sender.send(msg).is_err() {
