@@ -74,9 +74,16 @@ get_tmpdir() {
 }
 
 # Gets the latest github release tag (version)
-get_version_from_github() {
+get_tag_from_github() {
   ver=$(wget -qO - "https://api.github.com/repos/${GH_USER}/${PROJECT}/releases/latest" |
     grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+  echo "$ver"
+}
+
+# Gets the latest github release version from the tag
+get_version_from_tag() {
+  tag="$1"
+  ver=$(echo "$tag" | sed -E "s|$PROJECT-([0-9]+\.[0-9]+\.[0-9]+)|\1|")
   echo "$ver"
 }
 
@@ -440,9 +447,10 @@ if [ "${PLATFORM}" = "pc-windows-msvc" ]; then
   EXT=zip
 fi
 
-VERSION=$(get_version_from_github)
-URL="${BASE_URL}/latest/download/${PROJECT}-${VERSION}-${TARGET}.${EXT}"
+TAG=$(get_tag_from_github)
+URL="${BASE_URL}/download/${TAG}/${TAG}-${TARGET}.${EXT}"
 info "Tarball URL: ${UNDERLINE}${BLUE}${URL}${NO_COLOR}"
+VERSION=$(get_version_from_tag "${TAG}")
 confirm "Install $PROJECT ${GREEN}v${VERSION} (latest)${NO_COLOR} to ${BOLD}${GREEN}${BIN_DIR}${NO_COLOR}?"
 check_bin_dir "${BIN_DIR}"
 
