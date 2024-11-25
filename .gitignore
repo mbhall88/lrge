@@ -7,5 +7,7 @@ paper/.*/
 paper/archive
 paper/data
 paper/logs
+paper/notebooks/*.csv*
+paper/*.csv*
 
 tmp/
