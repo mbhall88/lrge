@@ -1,0 +1,14 @@
+.git*
+target/
+tmp*/
+benchmark
+ci
+clippy.toml
+codecov.yml
+data
+img
+scripts
+.ide*
+cog.toml
+install/
+paper/
