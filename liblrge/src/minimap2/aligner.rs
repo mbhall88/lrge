@@ -56,7 +56,7 @@ impl Aligner {
         let result = unsafe {
             let preset: i32 = 0;
             mm_set_opt(
-                preset as *const i8,
+                preset as *const libc::c_char,
                 &mut aligner.idxopt,
                 &mut aligner.mapopt,
             )
@@ -73,7 +73,7 @@ impl Aligner {
     pub fn preset(mut self, preset: &[u8]) -> Self {
         let result = unsafe {
             mm_set_opt(
-                preset.as_ptr() as *const i8,
+                preset.as_ptr() as *const libc::c_char,
                 &mut self.idxopt,
                 &mut self.mapopt,
             )
