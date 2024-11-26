@@ -1,0 +1,16 @@
+ignore_merge_commits = true
+monorepo_version_separator = "-"
+
+[commit_types]
+chore = { changelog_title = "Chore", omit_from_changelog = true }
+ci = { changelog_title = "Continuous Integration", omit_from_changelog = true }
+
+[changelog]
+#path = "CHANGELOG.md"
+template = "remote"
+remote = "github.com"
+repository = "lrge"
+owner = "mbhall88"
+authors = [
+    { signature = "Michael Hall", username = "mbhall88" },
+]
