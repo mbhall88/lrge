@@ -1,33 +1,21 @@
 [target.aarch64-unknown-linux-gnu]
-# Additional commands to run prior to building the package.
-# These override the commands present in `[build]`: they
-# will not merge.
 pre-build = [
     "dpkg --add-architecture $CROSS_DEB_ARCH",
     "apt-get update && apt-get install -y zlib1g-dev:$CROSS_DEB_ARCH",
 ]
 
 [target.x86_64-unknown-linux-gnu]
-# Additional commands to run prior to building the package.
-# These override the commands present in `[build]`: they
-# will not merge.
 pre-build = [
     "dpkg --add-architecture $CROSS_DEB_ARCH",
     "apt-get update && apt-get install -y zlib1g-dev:$CROSS_DEB_ARCH",
 ]
 
-[target.x86_64-apple-darwin]
-# Additional commands to run prior to building the package.
-# These override the commands present in `[build]`: they
-# will not merge.
+[target.aarch64-apple-darwin]
 pre-build = [
     "brew install zlib",
 ]
 
-[target.aarch64-apple-darwin]
-# Additional commands to run prior to building the package.
-# These override the commands present in `[build]`: they
-# will not merge.
+[target.x86_64-apple-darwin]
 pre-build = [
     "brew install zlib",
 ]

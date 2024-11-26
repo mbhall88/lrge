@@ -20,7 +20,9 @@ jobs:
       matrix:
         job:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, use-cross: true }
-          - { os: macOS-latest, target: aarch64-apple-darwin, use-cross: true }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, use-cross: true }
+          - { os: macos-13, target: x86_64-apple-darwin, use-cross: true }  # we use macos-13 to avoid the new Apple silicon chips on the latest runners which cause issues with zlib
+          - { os: macos-latest, target: aarch64-apple-darwin, use-cross: true }
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
