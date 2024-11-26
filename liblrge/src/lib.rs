@@ -78,13 +78,13 @@
 //! To **disable all compression features**:
 //!
 //! ```toml
-//! liblrge = { version = "0.1.0", default-features = false }
+//! liblrge = { version = "0.1.1", default-features = false }
 //! ```
 //!
 //! To enable only specific compression formats, list the desired features in `Cargo.toml`:
 //!
 //! ```toml
-//! liblrge = { version = "0.1.0", default-features = false, features = ["gzip", "zstd"] }
+//! liblrge = { version = "0.1.1", default-features = false, features = ["gzip", "zstd"] }
 //! ```
 //!
 //! In this example, only `gzip` (`flate2`) and `zstd` are enabled, so `liblrge` will support `.gz`
