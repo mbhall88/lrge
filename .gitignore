@@ -11,3 +11,4 @@ paper/notebooks/*.csv*
 paper/*.csv*
 
 tmp/
+.DS_Store
