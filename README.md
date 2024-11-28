@@ -344,16 +344,16 @@ For a full description of the method, see the [paper][doi].
 ### Two-set strategy
 
 The two-set strategy is the default method used by LRGE. It involves randomly selecting a two distinct subsets of reads 
-from the input. One subset is deemed the target set ($T$) and the other the query set ($Q$). Each read $`q_i`$ in $Q$ is overlapped 
-against $T$ and a genome size ($\textbf{GS}$) estimate is generated for that read ($`\textbf{GS}_{T,q_i}`$). The estimate is calculated based on 
-the number of overlaps of $`q_i`$ with reads in $T$ ($`O_{T,q_i}`$), according to the formula:
+from the input. One subset is deemed the target set ($T$) and the other the query set ($Q$). Each read $q_i$ in $Q$ is overlapped 
+against $T$ and a genome size ($\textbf{GS}$) estimate is generated for that read ($\textbf{GS}_{T,q_i}$). The estimate is calculated based on 
+the number of overlaps of $q_i$ with reads in $T$ ($\lvert \textbf{ov}(T \setminus q_i,q_i \rvert$), according to the formula:
 
 ```math
-\textbf{GS}_{T,q_i} \approx \frac{\vert T \vert \cdot \vert q_i \vert + \overline{t \in T} - 2 \cdot \textbf{OT}}{O_{T,q_i}}
+\textbf{GS}_{T,q_i} \approx \lvert T \setminus q_i \rvert \frac{\ell_{q_i} + \overline{\ell}_{T \setminus q_i} - 2 \cdot \textbf{\text{OT}}}{\lvert \textbf{\text{ov}}(T \setminus q_i,q_i) \rvert}
 ```
 
-where $\vert T \vert$ is the total size of the target set, $\vert q_i \vert$ is the length of read $q_i$, $\overline{t \in T}$ is 
-the average length of reads in $T$, and $\textbf{OT}$ is the overlap threshold (minimum chain score in minimap2, which 
+where $\vert T \setminus q_i \vert$ is the total size of the target set minus the read $q_i$, $\ell_{q_i}$ is the length of read $q_i$, $\overline{\ell}_{T \setminus q_i}$ is 
+the average length of reads in $T$ minus $q_i$, and $\textbf{OT}$ is the overlap threshold (minimum chain score in minimap2, which 
 defaults to 100 for overlaps). See [the paper][doi] for more formal/rigorous definitions.
 
 Ultimately, the genome size estimate is the median of the finite estimates for each read in $Q$.
@@ -366,9 +366,7 @@ the estimate all that much.
 ### All-vs-all strategy
 
 The all-vs-all strategy involves overlapping some random subset (`-n`) of reads in the input against each other. The 
-genome size estimate for each read is calculated as above, but we subtract one from $\vert T \vert$ to account for the fact 
-that the read is not being overlapped against itself. We also do not factor the length of the read whose size is being 
-estimated into the average read length calculation.
+genome size estimate for each read is calculated as above.
 
 This strategy is *generally* more computationally expensive than the two-set strategy, but it can be more accurate. Though 
 we did not find the difference to be statistically significant in our tests.
