@@ -349,7 +349,7 @@ against $T$ and a genome size ($\textbf{GS}$) estimate is generated for that rea
 the number of overlaps of $q_i$ with reads in $T$ ($\lvert \textbf{ov}(T \setminus q_i,q_i \rvert$), according to the formula:
 
 ```math
-\textbf{GS}_{T,q_i} \approx \lvert T \setminus q_i \rvert \frac{\ell_{q_i} + \overline{\ell}_{T \setminus q_i} - 2 \cdot \textbf{\text{OT}}}{\lvert \textbf{\text{ov}}(T \setminus q_i,q_i) \rvert}
+\textbf{GS}_{T,q_i} \approx \lvert T \setminus q_i \rvert \frac{\ell_{q_i} + \overline{\ell}_{T \setminus q_i} - 2 \cdot \textbf{OT}}{\lvert \textbf{ov}(T \setminus q_i,q_i) \rvert}
 ```
 
 where $\vert T \setminus q_i \vert$ is the total size of the target set minus the read $q_i$, $\ell_{q_i}$ is the length of read $q_i$, $\overline{\ell}_{T \setminus q_i}$ is 
