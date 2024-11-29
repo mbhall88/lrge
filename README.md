@@ -139,6 +139,10 @@ $ target/release/lrge -h
 
 ## Usage
 
+> [!IMPORTANT]  
+> The default values were calibrated from bacterial genomes, so you may need to adjust them if you are working with larger
+genomes. See below for more details.
+
 Estimate the genome size of a set of *Mycobacterium tuberculosis* ONT [reads](https://www.ebi.ac.uk/ena/browser/view/SRR28370649) 
 ([true genome size](https://www.ebi.ac.uk/ena/browser/view/CP149484): 4.40 Mbp / 4405449 bp).
 
@@ -164,6 +168,11 @@ $ cat size.txt
 
 By default, LRGE uses the [two-set strategy](#two-set-strategy) with 10,000 target reads (`-T`) and 5,000 query reads 
 (`-Q`). You can use the [all-vs-all strategy](#all-vs-all-strategy) by specifying the number of reads to use with the `-n` flag.
+
+In the paper, we ran LRGE on three eukaoryotic genomes: *Arabidopsis thaliana* (125 Mbp), *Drosophila melanogaster* 
+(143 Mbp), and *Saccharomyces cerevisiae* (12 Mbp). We used 50,000 query and 100,000 target reads for *A. thaliana* and 
+*D. melanogaster*, and 10,000 query and 20,000 target reads for *S. cerevisiae*.
+
 
 ### Library
 
