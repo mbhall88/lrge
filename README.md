@@ -420,8 +420,8 @@ metric.
 The methods we compare against are:
 
 [GenomeScope2](https://github.com/tbenavi1/genomescope2.0): to get estimates from GenomeScope2, you need to first generate 
-a k-mer spectrum. We used [KMC](https://github.com/refresh-bio/KMC) for this. You can find a Python script that takes reads 
-and generates a k-mer spectrum in [`genomescope.py`](./paper/workflow/scripts/genomescope.py). The list of parameters used 
+a k-mer spectrum. We used [KMC](https://github.com/refresh-bio/KMC) for this. You can find a Python script that takes 
+reads, generates a k-mer spectrum, and estimates genome size in [`genomescope.py`](./paper/workflow/scripts/genomescope.py). The list of parameters used 
 can also be found in the [workflow config](./paper/config/config.yaml).
 
 [Mash](https://github.com/marbl/Mash): we used `mash sketch` on the reads, which prints out the estimated genome size in 
