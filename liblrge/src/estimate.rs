@@ -26,19 +26,18 @@ pub trait Estimate {
     /// A `Vec<f32>` containing the generated estimates. These estimates may be finite or infinite.
     fn generate_estimates(&mut self) -> crate::Result<(Vec<f32>, u32)>;
 
-    // todo add link to paper
     /// Generate an estimate of the genome size, taking the median of the per-read estimates.
     ///
     /// # Arguments
     ///
     /// * `finite`: Whether to consider only finite estimates. We found setting this to `true` gave
-    ///   more accurate results (see the paper).
+    ///   more accurate results (see [the paper][doi]).
     /// * `lower_quant`: The lower percentile to calculate. If `None`, this will not be calculated.
     ///   This value should be between 0 and 0.5. So, for the 25th percentile, you would pass `0.25`.
     /// * `upper_quant`: The upper percentile to calculate. If `None`, this will not be calculated.
     ///   This value should be between 0.5 and 1.0. So, for the 75th percentile, you would pass `0.75`.
     ///
-    /// In our analysis, we found that the 15th and 65th percentiles gave the highest confidence (~92%).
+    /// In [our analysis][doi], we found that the 15th and 65th percentiles gave the highest confidence (~92%).
     /// If you want to use our most current recommended values, you can use the constants [`LOWER_QUANTILE`]
     /// and [`UPPER_QUANTILE`]. You can of course use any values you like.
     ///
@@ -51,6 +50,8 @@ pub trait Estimate {
     ///
     /// The estimate will be `None` if there are no finite estimates when `finite` is `true`, or if
     /// there are no estimates at all.
+    ///
+    /// [doi]: https://doi.org/10.1101/2024.11.27.625777
     fn estimate(
         &mut self,
         finite: bool,
@@ -130,13 +131,14 @@ fn calculate_quantile(data: &[f32], quantile: f32) -> Option<f32> {
     }
 }
 
-// todo add link to paper
-/// Estimate genome size using the formula from Equation 3 in the paper.
+/// Estimate genome size using the formula from Equation 3 in [the paper][doi].
 ///
 /// # Returns
 ///
 /// A floating point number representing the estimated genome size. If the number of overlaps is 0,
 /// this function will return [`f32::INFINITY`].
+///
+/// [doi]: https://doi.org/10.1101/2024.11.27.625777
 pub(crate) fn per_read_estimate(
     read_len: usize,
     avg_target_len: f32,

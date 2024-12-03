@@ -124,7 +124,7 @@
 //!
 //! [log]: https://crates.io/crates/log
 //! [env_logger]: https://crates.io/crates/env_logger
-// todo add link to paper
+//! [doi]: https://doi.org/10.1101/2024.11.27.625777
 #[deny(missing_docs)]
 pub mod ava;
 pub mod error;

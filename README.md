@@ -2,13 +2,14 @@
 
 [![check](https://github.com/mbhall88/lrge/actions/workflows/check.yml/badge.svg)](https://github.com/mbhall88/lrge/actions/workflows/check.yml)
 [![test](https://github.com/mbhall88/lrge/actions/workflows/test.yml/badge.svg)](https://github.com/mbhall88/lrge/actions/workflows/test.yml)
+[![DOI:10.1101/2024.11.27.625777](https://img.shields.io/badge/citation-10.1101/2024.11.27.625777-blue)][doi]
 
 **L**ong **R**ead-based **G**enome size **E**stimation from overlaps
 
 LRGE (pronounced "large") is a command line tool for estimating genome size from long read overlaps. The tool is built 
 on top of the [`liblrge`][liblrge] Rust library, which is also available as a standalone library for use in other projects.
 
-> PREPRINT/PAPER COMING SOON
+> Hall, M. B.; Coin, L. J. M. Genome Size Estimation from Long Read Overlaps. bioRxiv 2024, 2024.11.27.625777. doi:[10.1101/2024.11.27.625777][doi].
 
 ## Table of Contents
 
@@ -169,7 +170,7 @@ $ cat size.txt
 By default, LRGE uses the [two-set strategy](#two-set-strategy) with 10,000 target reads (`-T`) and 5,000 query reads 
 (`-Q`). You can use the [all-vs-all strategy](#all-vs-all-strategy) by specifying the number of reads to use with the `-n` flag.
 
-In the paper, we ran LRGE on three eukaoryotic genomes: *Arabidopsis thaliana* (125 Mbp), *Drosophila melanogaster* 
+In [the paper][doi], we ran LRGE on three eukaoryotic genomes: *Arabidopsis thaliana* (125 Mbp), *Drosophila melanogaster* 
 (143 Mbp), and *Saccharomyces cerevisiae* (12 Mbp). We used 50,000 query and 100,000 target reads for *A. thaliana* and 
 *D. melanogaster*, and 10,000 query and 20,000 target reads for *S. cerevisiae*.
 
@@ -433,15 +434,24 @@ You can find the full details of how we compared methods in the [workflow](./pap
 
 ## Citation
 
-If you use LRGE in your research, please cite the following paper:
+If you use LRGE in your research, please cite the following [paper][doi]:
 
 ```bibtex
-COMING SOON
+@article{hall_genome_2024,
+	title = {Genome size estimation from long read overlaps},
+	url = {https://biorxiv.org/content/early/2024/12/02/2024.11.27.625777.abstract},
+	doi = {10.1101/2024.11.27.625777},
+	journal = {bioRxiv},
+	author = {Hall, Michael B and Coin, Lachlan J M},
+	month = jan,
+	year = {2024},
+	pages = {2024.11.27.625777},
+}
 ```
 
 [apptainer]: https://github.com/apptainer/apptainer
 [docker]: https://docs.docker.com/
-[doi]: https://doi.org/TODO
+[doi]: https://doi.org/10.1101/2024.11.27.625777
 [ghcr]: https://github.com/mbhall88/lrge/pkgs/container/lrge
 [liblrge]: https://www.docs.rs/liblrge
 [quay.io]: https://quay.io/repository/mbhall88/lrge
