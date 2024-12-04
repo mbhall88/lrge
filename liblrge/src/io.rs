@@ -113,7 +113,9 @@ impl FastqRecordExt for needletail::parser::SequenceRecord<'_> {
     /// and the read ID. This method returns only the read ID.
     fn read_id(&self) -> &[u8] {
         let id = self.id();
-        id.split(|&x| x == b' ').next().unwrap_or_default()
+        id.split(|&x| x.is_ascii_whitespace())
+            .next()
+            .unwrap_or_default()
     }
 }
 
@@ -236,5 +238,50 @@ mod tests {
         let reader = Cursor::new(data);
         let err = count_fastq_records(reader).unwrap_err();
         assert!(err.to_string().contains("but quality length is"));
+    }
+
+    #[test]
+    fn test_read_id_no_comment() {
+        let data = b"@SEQ_ID\nGATTA\n+\n!!!!!\n";
+        let reader = Cursor::new(data);
+        let mut fastx_reader = parse_fastx_reader(reader).unwrap();
+        let record = fastx_reader.next().unwrap().unwrap();
+        assert_eq!(record.read_id(), b"SEQ_ID");
+    }
+
+    #[test]
+    fn test_read_id_with_comment() {
+        let data = b"@SEQ_ID comment\nGATTA\n+\n!!!!!\n";
+        let reader = Cursor::new(data);
+        let mut fastx_reader = parse_fastx_reader(reader).unwrap();
+        let record = fastx_reader.next().unwrap().unwrap();
+        assert_eq!(record.read_id(), b"SEQ_ID");
+    }
+
+    #[test]
+    fn test_read_id_with_empty_comment() {
+        let data = b"@SEQ_ID \nGATTA\n+\n!!!!!\n";
+        let reader = Cursor::new(data);
+        let mut fastx_reader = parse_fastx_reader(reader).unwrap();
+        let record = fastx_reader.next().unwrap().unwrap();
+        assert_eq!(record.read_id(), b"SEQ_ID");
+    }
+
+    #[test]
+    fn test_read_id_with_multiple_spaces() {
+        let data = b"@SEQ_ID   comment\nGATTA\n+\n!!!!!\n";
+        let reader = Cursor::new(data);
+        let mut fastx_reader = parse_fastx_reader(reader).unwrap();
+        let record = fastx_reader.next().unwrap().unwrap();
+        assert_eq!(record.read_id(), b"SEQ_ID");
+    }
+
+    #[test]
+    fn test_read_id_with_tabs() {
+        let data = b"@SEQ_ID\tst:Z:2024-06-05T11:34:21.517+00:00\tRG:Z:0e9626940687df5718807f8d3dcf3c2d2b2e49c6_dna_r10.4.1_e8.2_400bps_sup@v5.0.0_SQK-RBK114-96_barcode58\nGATTA\n+\n!!!!!\n";
+        let reader = Cursor::new(data);
+        let mut fastx_reader = parse_fastx_reader(reader).unwrap();
+        let record = fastx_reader.next().unwrap().unwrap();
+        assert_eq!(record.read_id(), b"SEQ_ID");
     }
 }
