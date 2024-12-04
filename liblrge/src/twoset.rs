@@ -43,6 +43,7 @@
 mod builder;
 
 use std::collections::HashSet;
+use std::ffi::CString;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -261,17 +262,15 @@ impl TwoSetStrategy {
                     let io::Message::Data((rid, seq)) = record;
                     trace!("Processing read: {}", String::from_utf8_lossy(&rid));
 
-                    let mut qname = rid.to_owned();
-                    if qname.last() != Some(&0) {
-                        // Ensure the qname is null-terminated
-                        qname.push(0);
-                    }
+                    let qname = CString::new(rid).map_err(|e| {
+                        LrgeError::MapError(format!("Error converting read ID to CString: {}", e))
+                    })?;
 
                     // Use the shared aligner to perform alignment
                     let mappings = aligner.map(&seq, Some(&qname)).map_err(|e| {
                         LrgeError::MapError(format!(
                             "Error mapping read {}: {}",
-                            String::from_utf8_lossy(&rid),
+                            String::from_utf8_lossy(qname.as_bytes()),
                             e
                         ))
                     })?;
@@ -290,7 +289,7 @@ impl TwoSetStrategy {
                     } else {
                         trace!(
                             "No overlaps found for read: {}",
-                            String::from_utf8_lossy(&rid)
+                            String::from_utf8_lossy(qname.as_bytes())
                         );
                         no_mapping_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
@@ -303,7 +302,11 @@ impl TwoSetStrategy {
                         overlap_threshold,
                     );
 
-                    trace!("Estimate for {}: {}", String::from_utf8_lossy(&rid), est);
+                    trace!(
+                        "Estimate for {}: {}",
+                        String::from_utf8_lossy(qname.as_bytes()),
+                        est
+                    );
 
                     {
                         // Lock the estimates vector and push the estimate

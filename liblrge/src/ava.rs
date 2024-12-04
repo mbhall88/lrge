@@ -38,6 +38,7 @@
 mod builder;
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::CString;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
@@ -251,11 +252,9 @@ impl AvaStrategy {
                     let io::Message::Data((rid, seq)) = record;
                     trace!("Processing read: {}", String::from_utf8_lossy(&rid));
 
-                    let mut qname = rid.to_owned();
-                    if qname.last() != Some(&0) {
-                        // Ensure the qname is null-terminated
-                        qname.push(0);
-                    }
+                    let qname = CString::new(rid.clone()).map_err(|e| {
+                        LrgeError::MapError(format!("Error converting read name to CString: {}", e))
+                    })?;
 
                     // Use the shared aligner to perform alignment
                     let mappings = aligner.map(&seq, Some(&qname)).map_err(|e| {

@@ -1,7 +1,7 @@
 //! Data structures and methods for working with the C bindings of minimap2.
 //!
 //! The code in this module has been adapted from the [`minimap2` crate](https://crates.io/crates/minimap2).
-use std::ffi::c_void;
+use std::ffi::{c_void, CString};
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -191,7 +191,7 @@ impl Aligner {
     pub fn map(
         &self,
         seq: &[u8],
-        query_name: Option<&[u8]>,
+        query_name: Option<&CString>,
     ) -> Result<Vec<PafRecord>, &'static str> {
         // Make sure index is set
         if self.idx.is_none() {
@@ -209,9 +209,9 @@ impl Aligner {
 
         let qname = match query_name {
             None => std::ptr::null(),
-            Some(qname) => qname.as_ptr() as *const ::std::os::raw::c_char,
+            Some(qname) => qname.as_ptr(),
         };
-        let query_name = query_name.map(|q| q.to_vec()).unwrap_or(b"*".to_vec());
+        let query_name = query_name.map(|q| q.as_bytes()).unwrap_or(b"*");
         let query_len = seq.len() as i32;
 
         let mappings = BUF.with(|buf| {
@@ -261,7 +261,7 @@ impl Aligner {
                             as i32,
                         target_start: reg.rs,
                         target_end: reg.re,
-                        query_name: query_name.clone(),
+                        query_name: query_name.to_vec(),
                         query_len,
                         query_start: reg.qs,
                         query_end: reg.qe,
