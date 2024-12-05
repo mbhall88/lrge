@@ -6,7 +6,7 @@ use std::path::Path;
 #[cfg(feature = "bzip2")]
 use bzip2::bufread::BzDecoder;
 #[cfg(feature = "gzip")]
-use flate2::bufread::GzDecoder;
+use flate2::bufread::MultiGzDecoder;
 #[cfg(feature = "xz")]
 use liblzma::read::XzDecoder;
 use needletail::parse_fastx_reader;
@@ -67,7 +67,7 @@ pub(crate) fn open_file<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read + Se
 
     let reader: Box<dyn Read + Send> = match compression_format {
         #[cfg(feature = "gzip")]
-        CompressionFormat::Gzip => Box::new(GzDecoder::new(buf)),
+        CompressionFormat::Gzip => Box::new(MultiGzDecoder::new(buf)),
 
         #[cfg(feature = "zstd")]
         CompressionFormat::Zstd => Box::new(ZstdDecoder::new(buf)?),
