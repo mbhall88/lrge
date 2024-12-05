@@ -1,3 +1,7 @@
+## 0.1.3 ([2467dab..01de783](https://github.com/mbhall88/lrge/compare/2467dab..01de783))
+#### Bug Fixes
+- handle multi-member gzip compressed files - ([2412f4a](https://github.com/mbhall88/lrge/commit/2412f4ab52c9fd8baf3e310fd637f389228ac7f6)) - [@mbhall88](https://github.com/mbhall88) - fixes <https://github.com/gbouras13/hybracter/issues/110>
+
 ## 0.1.2 ([495d160..dbe9bf3](https://github.com/mbhall88/lrge/compare/495d160..dbe9bf3))
 #### Bug Fixes
 - **(liblrge)** FASTQ read ID was not splitting on tabs - ([9fd66b7](https://github.com/mbhall88/lrge/commit/9fd66b77fa971fc17086686faf3c1da8fd8111d4)) - [@mbhall88](https://github.com/mbhall88) with thanks to bug hunter 🐛 [@gbouras13](https://github.com/gbouras13) 🐛 
