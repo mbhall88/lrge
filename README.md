@@ -112,7 +112,7 @@ The above will use the latest version. If you want to specify a version then use
 [tag][ghcr] like so.
 
 ```shell
-$ VERSION="0.1.1"
+$ VERSION="0.1.3"
 $ URI="docker://ghcr.io/mbhall88/lrge:${VERSION}"
 ```
 
