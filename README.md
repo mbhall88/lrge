@@ -18,6 +18,7 @@ on top of the [`liblrge`][liblrge] Rust library, which is also available as a st
 - [Method](#method)
 - [Results](#results)
 - [Benchmark](#benchmark)
+- [Alternatives](#alternatives)
 - [Citation](#citation)
  
 
@@ -35,8 +36,6 @@ on top of the [`liblrge`][liblrge] Rust library, which is also available as a st
 
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/mbhall88/lrge/total)
 ![GitHub Release](https://img.shields.io/github/v/release/mbhall88/lrge)
-
-
 
 ```shell
 curl -sSL lrge.mbh.sh | sh
@@ -266,6 +265,8 @@ directory
 ```
 $ lrge -D ./mytemp/ reads.fq
 ```
+
+If you have Illumina data, try GenomeScope2 or Mash (see [alternatives](#alternatives) for more details).
 
 ---
 
