@@ -108,6 +108,19 @@ impl Aligner {
         self
     }
 
+    /// Set index batch_size '-I'
+    pub fn with_index_size(mut self, batch: usize) -> Self {
+        if batch > 0 {
+            self.idxopt.batch_size = batch as u64;    
+        } else {
+            // set -I32G
+            // self.idxopt.batch_size = 0x800000000;
+            // set to maximum to avoid multi-part indexing
+            self.idxopt.batch_size = 0x7fffffffffffffff;
+        }
+        self
+    }
+
     /// Set index parameters for minimap2 using builder pattern
     /// Creates the index as well with the given number of threads (set at struct creation).
     /// You must set the number of threads before calling this function.
@@ -159,7 +172,7 @@ impl Aligner {
             mm_idx_reader_open(path_str.as_ptr(), &self.idxopt, output.as_ptr())
         });
 
-        let idx;
+        let idx: MaybeUninit<*mut mm_idx_t>;
 
         let idx_reader = unsafe { idx_reader.assume_init() };
 
@@ -305,6 +318,7 @@ impl AlignerWrapper {
             .preset(preset.as_bytes())
             .dual(dual)
             .with_index_threads(threads)
+            .with_index_size(0)
             .with_index(target_file, None)
             .unwrap();
 
