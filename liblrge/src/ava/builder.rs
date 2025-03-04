@@ -6,6 +6,7 @@ use crate::Platform;
 /// A builder for [`AvaStrategy`].
 pub struct Builder {
     num_reads: usize,
+    num_bases: usize,
     tmpdir: PathBuf,
     threads: usize,
     seed: Option<u64>,
@@ -17,6 +18,7 @@ impl Default for Builder {
         let tmpdir = std::env::temp_dir();
         Self {
             num_reads: DEFAULT_AVA_NUM_READS,
+            num_bases: 0,
             tmpdir,
             threads: 1,
             seed: None,
@@ -126,6 +128,7 @@ impl Builder {
         AvaStrategy {
             input: input.as_ref().to_path_buf(),
             num_reads: self.num_reads,
+            num_bases: self.num_bases,
             tmpdir: self.tmpdir,
             threads: self.threads,
             seed: self.seed,

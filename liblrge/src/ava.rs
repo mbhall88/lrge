@@ -72,6 +72,8 @@ pub struct AvaStrategy {
     input: PathBuf,
     /// The number of reads to use in the strategy.
     num_reads: usize,
+    /// The number of bases to use in the strategy.
+    num_bases: usize,
     /// The directory to which all intermediate files will be written.
     tmpdir: PathBuf,
     /// Number of threads to use with minimap2.
@@ -156,6 +158,8 @@ impl AvaStrategy {
 
             idx += 1;
         }
+
+        self.num_bases = sum_len;
 
         debug!("Reads written to: {}", out_file.display());
         debug!("Total bases written: {}", sum_len);
