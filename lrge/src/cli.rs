@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 const TARGET_NUM_READS: &str = "10000";
 const QUERY_NUM_READS: &str = "5000";
+const MAX_OVERHANG_SIZE: &str = "1000";
+const MAX_OVERHANG_RATIO: &str = "0.8";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -31,6 +33,10 @@ pub struct Args {
     /// Sequencing platform of the reads
     #[arg(short = 'P', long, value_name = "PLATFORM", value_parser = ["ont", "pb"], default_value = "ont")]
     pub platform: String,
+
+    /// Exclude overlaps for internal matches
+    #[arg(short = 'F', long = "do-filter")]
+    pub do_filt: bool,
 
     /// Number of threads to use
     #[arg(short, long, value_name = "INT", default_value = "1")]
@@ -63,6 +69,14 @@ pub struct Args {
     /// The upper quantile to use for the estimate
     #[arg(long = "q3", value_name = "FLOAT", default_value_t = liblrge::estimate::UPPER_QUANTILE, value_parser = validate_high_quantile, hide_short_help = true)]
     pub upper_q: f32,
+
+    /// Maximum overhang size for internal overlap filtering
+    #[arg(long = "max-overhang-size", value_name = "INT", default_value = MAX_OVERHANG_SIZE, value_parser = validate_overhang_size, hide_short_help = true)]
+    pub max_overhang_size: i32,
+
+    /// Maximum overhang ratio for internal overlap filtering
+    #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, hide_short_help = true)]
+    pub max_overhang_ratio: f32,
 
     /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
     #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]
@@ -106,6 +120,36 @@ fn validate_low_quantile(s: &str) -> Result<f32, String> {
 /// A value parser for the upper quantile
 fn validate_high_quantile(s: &str) -> Result<f32, String> {
     validate_quantile(s, 0.5, 1.0)
+}
+
+/// A value parser for the maximum overhang size
+fn validate_overhang_size(s: &str) -> Result<i32, String> {
+    let value: i32 = s
+        .parse()
+        .map_err(|_| format!("`{}` is not a valid number", s))?;
+    if value >= 0 {
+        Ok(value)
+    } else {
+        Err(format!(
+            "Value `{}` must be a non-negative integer",
+            s
+        ))
+    }
+}
+
+/// A value parser for the maximum overhang ratio
+fn validate_overhang_ratio(s: &str) -> Result<f32, String> {
+    let value: f32 = s
+        .parse()
+        .map_err(|_| format!("`{}` is not a valid number", s))?;
+    if value >= 0.0 && value <= 1.0 {
+        Ok(value)
+    } else {
+        Err(format!(
+            "Value `{}` must be between 0.0 and 1.0",
+            s
+        ))
+    }
 }
 
 #[cfg(test)]
