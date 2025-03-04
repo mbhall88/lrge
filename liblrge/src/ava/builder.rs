@@ -7,6 +7,9 @@ use crate::Platform;
 pub struct Builder {
     num_reads: usize,
     num_bases: usize,
+    remove_internal: bool,
+    max_overhang_size: i32,
+    max_overhang_ratio: f32,
     tmpdir: PathBuf,
     threads: usize,
     seed: Option<u64>,
@@ -19,6 +22,9 @@ impl Default for Builder {
         Self {
             num_reads: DEFAULT_AVA_NUM_READS,
             num_bases: 0,
+            remove_internal: false,
+            max_overhang_size: 1000,
+            max_overhang_ratio: 0.8,
             tmpdir,
             threads: 1,
             seed: None,
@@ -52,6 +58,16 @@ impl Builder {
     /// ```
     pub fn num_reads(mut self, num_reads: usize) -> Self {
         self.num_reads = num_reads;
+        self
+    }
+
+    /// Set option for removing the overlaps representing internal matches
+    pub fn remove_internal(mut self, do_filt: bool, size: i32, ratio: f32) -> Self {
+        self.remove_internal = do_filt;
+        if do_filt {
+            self.max_overhang_size = size;
+            self.max_overhang_ratio = ratio;
+        }
         self
     }
 
@@ -129,6 +145,9 @@ impl Builder {
             input: input.as_ref().to_path_buf(),
             num_reads: self.num_reads,
             num_bases: self.num_bases,
+            remove_internal: self.remove_internal,
+            max_overhang_size: self.max_overhang_size,
+            max_overhang_ratio: self.max_overhang_ratio,
             tmpdir: self.tmpdir,
             threads: self.threads,
             seed: self.seed,

@@ -49,6 +49,7 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
+use std::cmp;
 
 use crossbeam_channel as channel;
 use log::{debug, trace, warn};
@@ -82,6 +83,12 @@ pub struct TwoSetStrategy {
     query_num_reads: usize,
     /// The number of query bases to use in the strategy.
     query_num_bases: usize,
+    /// Remove overlaps for internal matches.
+    remove_internal: bool,
+    /// Maximum overhang size
+    max_overhang_size: i32,
+    /// Maximum overhang ratio
+    max_overhang_ratio: f32,
     /// The directory to which all intermediate files will be written.
     tmpdir: PathBuf,
     /// Number of threads to use with minimap2.
@@ -289,6 +296,8 @@ impl TwoSetStrategy {
                     })?;
 
                     let mut unique_overlaps = HashSet::new();
+                    let mut overhang: i32;
+                    let mut maplen: i32;
 
                     if !mappings.is_empty() {
                         {
@@ -296,6 +305,19 @@ impl TwoSetStrategy {
                             for mapping in &mappings {
                                 // write the PafRecord to the PAF file
                                 writer_lock.serialize(mapping)?;
+                                if self.remove_internal {
+                                    if mapping.strand == '+' {
+                                        overhang = cmp::min(mapping.query_start, mapping.target_start) + 
+                                            cmp::min(mapping.query_len - mapping.query_end, mapping.target_len - mapping.target_end);
+                                    } else {
+                                        overhang = cmp::min(mapping.query_start, mapping.target_len - mapping.target_end) + 
+                                            cmp::min(mapping.query_len - mapping.query_end, mapping.target_start);
+                                    }
+                                    maplen = cmp::max(mapping.query_end - mapping.query_start, mapping.target_end - mapping.target_start);
+                                    if overhang > self.max_overhang_size || overhang > ((maplen as f32) * self.max_overhang_ratio) as i32 {
+                                        continue;
+                                    }
+                                }
                                 unique_overlaps.insert(mapping.target_name.clone());
                             }
                         }

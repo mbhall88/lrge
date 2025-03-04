@@ -10,6 +10,9 @@ pub struct Builder {
     target_num_bases: usize,
     query_num_reads: usize,
     query_num_bases: usize,
+    remove_internal: bool,
+    max_overhang_size: i32,
+    max_overhang_ratio: f32,
     tmpdir: PathBuf,
     threads: usize,
     seed: Option<u64>,
@@ -24,6 +27,9 @@ impl Default for Builder {
             target_num_bases: 0,
             query_num_reads: DEFAULT_QUERY_NUM_READS,
             query_num_bases: 0,
+            remove_internal: false,
+            max_overhang_size: 1000,
+            max_overhang_ratio: 0.8,
             tmpdir,
             threads: 1,
             seed: None,
@@ -77,6 +83,16 @@ impl Builder {
     /// ```
     pub fn query_num_reads(mut self, query_num_reads: usize) -> Self {
         self.query_num_reads = query_num_reads;
+        self
+    }
+
+    /// Set option for removing the overlaps representing internal matches
+    pub fn remove_internal(mut self, do_filt: bool, size: i32, ratio: f32) -> Self {
+        self.remove_internal = do_filt;
+        if do_filt {
+            self.max_overhang_size = size;
+            self.max_overhang_ratio = ratio;
+        }
         self
     }
 
@@ -152,6 +168,9 @@ impl Builder {
             target_num_bases: self.target_num_bases,
             query_num_reads: self.query_num_reads,
             query_num_bases: self.query_num_bases,
+            remove_internal: self.remove_internal,
+            max_overhang_size: self.max_overhang_size,
+            max_overhang_ratio: self.max_overhang_ratio,
             tmpdir: self.tmpdir,
             threads: self.threads,
             seed: self.seed,

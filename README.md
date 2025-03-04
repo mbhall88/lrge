@@ -197,6 +197,7 @@ Options:
   -Q, --query <INT>          Query number of reads to use (for two-set strategy; default) [default: 5000]
   -n, --num <INT>            Number of reads to use (for all-vs-all strategy)
   -P, --platform <PLATFORM>  Sequencing platform of the reads [default: ont] [possible values: ont, pb]
+  -F, --do-filter            Exclude overlaps for internal matches
   -t, --threads <INT>        Number of threads to use [default: 1]
   -C, --keep-temp            Don't clean up temporary files
   -D, --temp <DIR>           Temporary directory for storing intermediate files
@@ -283,16 +284,17 @@ Arguments:
 Options:
   -o, --output <OUTPUT>
           Output file for the estimate
-
+          
           [default: -]
 
   -T, --target <INT>
           Target number of reads to use (for two-set strategy; default)
-
+          
           [default: 10000]
+
   -Q, --query <INT>
           Query number of reads to use (for two-set strategy; default)
-
+          
           [default: 5000]
 
   -n, --num <INT>
@@ -300,13 +302,16 @@ Options:
 
   -P, --platform <PLATFORM>
           Sequencing platform of the reads
-
+          
           [default: ont]
           [possible values: ont, pb]
 
+  -F, --do-filter
+          Exclude overlaps for internal matches
+
   -t, --threads <INT>
           Number of threads to use
-
+          
           [default: 1]
 
   -C, --keep-temp
@@ -326,13 +331,23 @@ Options:
 
       --q1 <FLOAT>
           The lower quantile to use for the estimate
-
+          
           [default: 0.15]
 
       --q3 <FLOAT>
           The upper quantile to use for the estimate
-
+          
           [default: 0.65]
+
+      --max-overhang-size <INT>
+          Maximum overhang size for internal overlap filtering
+          
+          [default: 1000]
+
+      --max-overhang-ratio <FLOAT>
+          Maximum overhang ratio for internal overlap filtering
+          
+          [default: 0.8]
 
   -q, --quiet...
           `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing

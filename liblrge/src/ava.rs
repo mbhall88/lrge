@@ -44,6 +44,7 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
+use std::cmp;
 
 use crossbeam_channel as channel;
 use log::{debug, trace, warn};
@@ -74,6 +75,12 @@ pub struct AvaStrategy {
     num_reads: usize,
     /// The number of bases to use in the strategy.
     num_bases: usize,
+    /// Remove overlaps for internal matches.
+    remove_internal: bool,
+    /// Maximum overhang size
+    max_overhang_size: i32,
+    /// Maximum overhang ratio
+    max_overhang_ratio: f32,
     /// The directory to which all intermediate files will be written.
     tmpdir: PathBuf,
     /// Number of threads to use with minimap2.
@@ -271,10 +278,13 @@ impl AvaStrategy {
 
                     {
                         let mut ovlap_counter_lock = ovlap_counter.lock().unwrap();
+                        let mut overhang: i32;
+                        let mut maplen: i32;
+                        
                         if !mappings.is_empty() {
                             let mut writer_lock = writer.lock().unwrap();
                             let mut seen_pairs_lock = seen_pairs.lock().unwrap();
-
+                            
                             for mapping in &mappings {
                                 // write the PafRecord to the PAF file
                                 writer_lock.serialize(mapping)?;
@@ -285,6 +295,20 @@ impl AvaStrategy {
                                     // Skip self-overlaps. if the qname is not in the ovlap_counter, we insert it with 0 overlaps
                                     ovlap_counter_lock.entry(rid.clone()).or_insert(0);
                                     continue;
+                                }
+
+                                if self.remove_internal {
+                                    if mapping.strand == '+' {
+                                        overhang = cmp::min(mapping.query_start, mapping.target_start) + 
+                                            cmp::min(mapping.query_len - mapping.query_end, mapping.target_len - mapping.target_end);
+                                    } else {
+                                        overhang = cmp::min(mapping.query_start, mapping.target_len - mapping.target_end) + 
+                                            cmp::min(mapping.query_len - mapping.query_end, mapping.target_start);
+                                    }
+                                    maplen = cmp::max(mapping.query_end - mapping.query_start, mapping.target_end - mapping.target_start);
+                                    if overhang > self.max_overhang_size || overhang > ((maplen as f32) * self.max_overhang_ratio) as i32 {
+                                        continue;
+                                    }
                                 }
 
                                 let pair = if &rid < tname {
@@ -301,10 +325,9 @@ impl AvaStrategy {
                                 *ovlap_counter_lock.entry(tname.clone()).or_insert(0) += 1;
                                 *ovlap_counter_lock.entry(rid.clone()).or_insert(0) += 1;
                             }
-                        } else {
-                            // if the qname is not in the ovlap_counter, we insert it with 0 overlaps
-                            ovlap_counter_lock.entry(rid.clone()).or_insert(0);
                         }
+                        // if the qname is not in the ovlap_counter, we insert it with 0 overlaps
+                        ovlap_counter_lock.entry(rid.clone()).or_insert(0);
                     }
 
                     Ok(())
