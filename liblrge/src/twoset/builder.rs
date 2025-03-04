@@ -7,7 +7,9 @@ use super::{TwoSetStrategy, DEFAULT_QUERY_NUM_READS, DEFAULT_TARGET_NUM_READS};
 /// A builder for [`TwoSetStrategy`].
 pub struct Builder {
     target_num_reads: usize,
+    target_num_bases: usize,
     query_num_reads: usize,
+    query_num_bases: usize,
     tmpdir: PathBuf,
     threads: usize,
     seed: Option<u64>,
@@ -19,7 +21,9 @@ impl Default for Builder {
         let tmpdir = std::env::temp_dir();
         Self {
             target_num_reads: DEFAULT_TARGET_NUM_READS,
+            target_num_bases: 0,
             query_num_reads: DEFAULT_QUERY_NUM_READS,
+            query_num_bases: 0,
             tmpdir,
             threads: 1,
             seed: None,
@@ -145,7 +149,9 @@ impl Builder {
         TwoSetStrategy {
             input: input.as_ref().to_path_buf(),
             target_num_reads: self.target_num_reads,
+            target_num_bases: self.target_num_bases,
             query_num_reads: self.query_num_reads,
+            query_num_bases: self.query_num_bases,
             tmpdir: self.tmpdir,
             threads: self.threads,
             seed: self.seed,

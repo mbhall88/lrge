@@ -76,8 +76,12 @@ pub struct TwoSetStrategy {
     input: PathBuf,
     /// The number of target reads to use in the strategy.
     target_num_reads: usize,
+    /// The number of target bases to use in the strategy.
+    target_num_bases: usize,
     /// The number of query reads to use in the strategy.
     query_num_reads: usize,
+    /// The number of query bases to use in the strategy.
+    query_num_bases: usize,
     /// The directory to which all intermediate files will be written.
     tmpdir: PathBuf,
     /// Number of threads to use with minimap2.
@@ -159,6 +163,7 @@ impl TwoSetStrategy {
         let mut target_writer = File::create(&target_file).map(BufWriter::new)?;
         let mut query_writer = File::create(&query_file).map(BufWriter::new)?;
         let mut sum_target_len = 0;
+        let mut sum_query_len: usize = 0;
         let mut idx: u32 = 0;
         while let Some(r) = fastx_reader.next() {
             // we can unwrap here because we know the file is valid from when we counted the records
@@ -173,6 +178,7 @@ impl TwoSetStrategy {
                 record.write(&mut query_writer, None).map_err(|e| {
                     LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
                 })?;
+                sum_query_len += record.num_bases();
             }
 
             if target_indices.is_empty() && query_indices.is_empty() {
@@ -182,10 +188,17 @@ impl TwoSetStrategy {
             idx += 1;
         }
 
+        self.target_num_bases = sum_target_len;
+        self.query_num_bases = sum_query_len;
+
         let avg_target_len = sum_target_len as f32 / self.target_num_reads as f32;
+        let avg_query_len: f32 = sum_query_len as f32 / self.query_num_reads as f32;
         debug!("Target reads written to: {}", target_file.display());
         debug!("Query reads written to: {}", query_file.display());
+        debug!("Total target bases: {}", sum_target_len);
+        debug!("Total query bases: {}", sum_query_len);
         debug!("Average target read length: {}", avg_target_len);
+        debug!("Average query read length: {}", avg_query_len);
 
         Ok((target_file, query_file, avg_target_len))
     }
