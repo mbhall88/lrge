@@ -57,7 +57,7 @@ fn main() -> Result<()> {
         info!("Running all-vs-all strategy with {} reads", num);
         let builder = liblrge::ava::Builder::new()
             .num_reads(num)
-            .remove_internal(args.do_filt, args.max_overhang_size, args.max_overhang_ratio)
+            .remove_internal(args.do_filt, args.max_overhang_ratio)
             .threads(args.threads)
             .tmpdir(tmpdir.path())
             .seed(args.seed);
@@ -73,7 +73,7 @@ fn main() -> Result<()> {
         let builder = liblrge::twoset::Builder::new()
             .target_num_reads(target_num_reads)
             .query_num_reads(query_num_reads)
-            .remove_internal(args.do_filt, args.max_overhang_size, args.max_overhang_ratio)
+            .remove_internal(args.do_filt, args.max_overhang_ratio)
             .threads(args.threads)
             .tmpdir(tmpdir.path())
             .seed(args.seed);

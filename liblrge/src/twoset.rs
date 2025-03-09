@@ -84,8 +84,6 @@ pub struct TwoSetStrategy {
     query_num_bases: usize,
     /// Remove overlaps for internal matches.
     remove_internal: bool,
-    /// Maximum overhang size
-    max_overhang_size: i32,
     /// Maximum overhang ratio
     max_overhang_ratio: f32,
     /// The directory to which all intermediate files will be written.
@@ -314,7 +312,7 @@ impl TwoSetStrategy {
                                             cmp::min(mapping.query_len - mapping.query_end, mapping.target_start);
                                     }
                                     maplen = cmp::max(mapping.query_end - mapping.query_start, mapping.target_end - mapping.target_start);
-                                    if overhang > self.max_overhang_size || overhang > ((maplen as f32) * self.max_overhang_ratio) as i32 {
+                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32 {
                                         continue;
                                     }
                                 }
@@ -519,7 +517,7 @@ impl TwoSetStrategy {
                                             cmp::min(mapping.query_len - mapping.query_end, mapping.target_start);
                                     }
                                     maplen = cmp::max(mapping.query_end - mapping.query_start, mapping.target_end - mapping.target_start);
-                                    if overhang > self.max_overhang_size || overhang > ((maplen as f32) * self.max_overhang_ratio) as i32 {
+                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32 {
                                         continue;
                                     }
                                 }

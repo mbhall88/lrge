@@ -4,8 +4,7 @@ use std::path::PathBuf;
 
 const TARGET_NUM_READS: &str = "10000";
 const QUERY_NUM_READS: &str = "5000";
-const MAX_OVERHANG_SIZE: &str = "1000";
-const MAX_OVERHANG_RATIO: &str = "0.8";
+const MAX_OVERHANG_RATIO: &str = "0.3";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -70,10 +69,6 @@ pub struct Args {
     #[arg(long = "q3", value_name = "FLOAT", default_value_t = liblrge::estimate::UPPER_QUANTILE, value_parser = validate_high_quantile, hide_short_help = true)]
     pub upper_q: f32,
 
-    /// Maximum overhang size for internal overlap filtering
-    #[arg(long = "max-overhang-size", value_name = "INT", default_value = MAX_OVERHANG_SIZE, value_parser = validate_overhang_size, hide_short_help = true)]
-    pub max_overhang_size: i32,
-
     /// Maximum overhang ratio for internal overlap filtering
     #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, hide_short_help = true)]
     pub max_overhang_ratio: f32,
@@ -120,21 +115,6 @@ fn validate_low_quantile(s: &str) -> Result<f32, String> {
 /// A value parser for the upper quantile
 fn validate_high_quantile(s: &str) -> Result<f32, String> {
     validate_quantile(s, 0.5, 1.0)
-}
-
-/// A value parser for the maximum overhang size
-fn validate_overhang_size(s: &str) -> Result<i32, String> {
-    let value: i32 = s
-        .parse()
-        .map_err(|_| format!("`{}` is not a valid number", s))?;
-    if value >= 0 {
-        Ok(value)
-    } else {
-        Err(format!(
-            "Value `{}` must be a non-negative integer",
-            s
-        ))
-    }
 }
 
 /// A value parser for the maximum overhang ratio

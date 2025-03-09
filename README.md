@@ -339,15 +339,10 @@ Options:
           
           [default: 0.65]
 
-      --max-overhang-size <INT>
-          Maximum overhang size for internal overlap filtering
-          
-          [default: 1000]
-
       --max-overhang-ratio <FLOAT>
-          Maximum overhang ratio for internal overlap filtering
+          Maximum overhang size to alignment length ratio for internal overlap filtering
           
-          [default: 0.8]
+          [default: 0.3]
 
   -q, --quiet...
           `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
