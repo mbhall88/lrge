@@ -152,7 +152,7 @@ pub(crate) fn per_read_estimate(
 
     let ovlap_ratio: f32 = n_target_reads as f32 / n_ovlaps as f32;
 
-    ovlap_ratio * (read_len as f32 + avg_target_len - 2.0 * ovlap_thresh as f32)
+    read_len as f32 + ovlap_ratio * (read_len as f32 + avg_target_len - 2.0 * ovlap_thresh as f32 + 1.0)
 }
 
 #[cfg(test)]

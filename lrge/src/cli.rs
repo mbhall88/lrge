@@ -69,7 +69,7 @@ pub struct Args {
     #[arg(long = "q3", value_name = "FLOAT", default_value_t = liblrge::estimate::UPPER_QUANTILE, value_parser = validate_high_quantile, hide_short_help = true)]
     pub upper_q: f32,
 
-    /// Maximum overhang ratio for internal overlap filtering
+    /// Maximum overhang size to alignment length ratio for internal overlap filtering
     #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, hide_short_help = true)]
     pub max_overhang_ratio: f32,
 
