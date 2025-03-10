@@ -28,7 +28,7 @@ impl Default for Builder {
             query_num_reads: DEFAULT_QUERY_NUM_READS,
             query_num_bases: 0,
             remove_internal: false,
-            max_overhang_ratio: 0.3,
+            max_overhang_ratio: 0.2,
             use_min_ref: false,
             tmpdir,
             threads: 1,

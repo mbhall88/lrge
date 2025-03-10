@@ -342,7 +342,7 @@ Options:
       --max-overhang-ratio <FLOAT>
           Maximum overhang size to alignment length ratio for internal overlap filtering
           
-          [default: 0.3]
+          [default: 0.2]
 
       --use-min-ref
           Use the smaller Q/T dataset as minimap2 reference (for two-set strategy)
