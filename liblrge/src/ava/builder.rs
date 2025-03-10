@@ -22,7 +22,7 @@ impl Default for Builder {
             num_reads: DEFAULT_AVA_NUM_READS,
             num_bases: 0,
             remove_internal: false,
-            max_overhang_ratio: 0.3,
+            max_overhang_ratio: 0.2,
             tmpdir,
             threads: 1,
             seed: None,

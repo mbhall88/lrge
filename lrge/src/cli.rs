@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 const TARGET_NUM_READS: &str = "10000";
 const QUERY_NUM_READS: &str = "5000";
-const MAX_OVERHANG_RATIO: &str = "0.3";
+const MAX_OVERHANG_RATIO: &str = "0.2";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
