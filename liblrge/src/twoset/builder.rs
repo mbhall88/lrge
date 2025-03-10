@@ -12,6 +12,7 @@ pub struct Builder {
     query_num_bases: usize,
     remove_internal: bool,
     max_overhang_ratio: f32,
+    use_min_ref: bool,
     tmpdir: PathBuf,
     threads: usize,
     seed: Option<u64>,
@@ -28,6 +29,7 @@ impl Default for Builder {
             query_num_bases: 0,
             remove_internal: false,
             max_overhang_ratio: 0.3,
+            use_min_ref: false,
             tmpdir,
             threads: 1,
             seed: None,
@@ -90,6 +92,12 @@ impl Builder {
         if do_filt {
             self.max_overhang_ratio = ratio;
         }
+        self
+    }
+
+    /// Set option for using the smaller Q/T dataset as minimap2 reference
+    pub fn use_min_ref(mut self, use_min_ref: bool) -> Self {
+        self.use_min_ref = use_min_ref;
         self
     }
 
@@ -167,6 +175,7 @@ impl Builder {
             query_num_bases: self.query_num_bases,
             remove_internal: self.remove_internal,
             max_overhang_ratio: self.max_overhang_ratio,
+            use_min_ref: self.use_min_ref,
             tmpdir: self.tmpdir,
             threads: self.threads,
             seed: self.seed,
