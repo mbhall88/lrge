@@ -344,6 +344,9 @@ Options:
           
           [default: 0.3]
 
+      --use-min-ref
+          Use the smaller Q/T dataset as minimap2 reference (for two-set strategy)
+
   -q, --quiet...
           `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
 

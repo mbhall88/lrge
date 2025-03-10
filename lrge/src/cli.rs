@@ -73,6 +73,10 @@ pub struct Args {
     #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, hide_short_help = true)]
     pub max_overhang_ratio: f32,
 
+    /// Use the smaller Q/T dataset as minimap2 reference (for two-set strategy)
+    #[arg(long = "use-min-ref", hide_short_help = true)]
+    pub use_min_ref: bool,
+
     /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
     #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]
     pub quiet: u8,

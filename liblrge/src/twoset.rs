@@ -86,6 +86,8 @@ pub struct TwoSetStrategy {
     remove_internal: bool,
     /// Maximum overhang ratio
     max_overhang_ratio: f32,
+    /// Use the smaller Q/T dataset as minimap2 reference
+    use_min_ref: bool,
     /// The directory to which all intermediate files will be written.
     tmpdir: PathBuf,
     /// Number of threads to use with minimap2.
@@ -596,14 +598,14 @@ impl Estimate for TwoSetStrategy {
             Platform::Nanopore => Preset::AvaOnt,
         };
 
-        if self.target_num_bases < self.query_num_bases {
-            // align query to target
-            let aligner = AlignerWrapper::new(&target_file, self.threads, preset, true)?;
-            self.align_reads(aligner, query_file, avg_target_len)
-        } else {
+        if self.use_min_ref && self.target_num_bases > self.query_num_bases {
             // align target to query
             let aligner = AlignerWrapper::new(&query_file, self.threads, preset, true)?;
             self.align_reads_inverse(aligner, target_file, avg_target_len)
+        } else {
+            // align query to target
+            let aligner = AlignerWrapper::new(&target_file, self.threads, preset, true)?;
+            self.align_reads(aligner, query_file, avg_target_len)
         }
     }
 }

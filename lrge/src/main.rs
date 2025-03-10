@@ -74,6 +74,7 @@ fn main() -> Result<()> {
             .target_num_reads(target_num_reads)
             .query_num_reads(query_num_reads)
             .remove_internal(args.do_filt, args.max_overhang_ratio)
+            .use_min_ref(args.use_min_ref)
             .threads(args.threads)
             .tmpdir(tmpdir.path())
             .seed(args.seed);
