@@ -451,9 +451,9 @@ impl TwoSetStrategy {
         for i in 0..self.query_num_reads {
             unsafe {
                 let qname: *mut ::std::os::raw::c_char =
-                    (*((*(aln_wrapper.aligner.idx.unwrap())).seq.offset(i as isize))).name;
+                    (*((*(aln_wrapper.aligner.idx.unwrap())).seq.add(i))).name;
                 let qname = std::ffi::CStr::from_ptr(qname).to_bytes().to_vec();
-                let qlens: usize = (*((*(aln_wrapper.aligner.idx.unwrap())).seq.offset(i as isize))).len as usize;
+                let qlens: usize = (*((*(aln_wrapper.aligner.idx.unwrap())).seq.add(i))).len as usize;
                 // add to read_lengths
                 if read_lengths.insert(qname.clone(), qlens).is_some() {
                     return Err(LrgeError::DuplicateReadIdentifier(
@@ -620,8 +620,8 @@ impl Estimate for TwoSetStrategy {
 ///
 /// # Arguments
 ///
-/// * `original` - The `Vec` to be split. This set will be consumed by the function,
-///                so it will no longer be accessible after the function call.
+/// * `original` - The `Vec` to be split. This set will be consumed by the function, so it will no
+///   longer be accessible after the function call.
 /// * `size_first` - The number of elements to place in the first set, `set1`.
 ///
 /// # Returns
