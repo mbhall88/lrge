@@ -126,7 +126,7 @@ fn validate_overhang_ratio(s: &str) -> Result<f32, String> {
     let value: f32 = s
         .parse()
         .map_err(|_| format!("`{}` is not a valid number", s))?;
-    if value >= 0.0 && value <= 1.0 {
+    if (0.0..=1.0).contains(&value) {
         Ok(value)
     } else {
         Err(format!(

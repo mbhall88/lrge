@@ -160,7 +160,7 @@ where
 {
     let s: &str = Deserialize::deserialize(deserializer)?;
     s.split(':')
-        .last()
+        .next_back()
         .ok_or_else(|| serde::de::Error::custom("Invalid field format"))
         .and_then(|val| val.parse::<T>().map_err(serde::de::Error::custom))
 }
