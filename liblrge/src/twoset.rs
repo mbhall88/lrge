@@ -295,8 +295,6 @@ impl TwoSetStrategy {
                     })?;
 
                     let mut unique_overlaps = HashSet::new();
-                    let mut overhang: i32;
-                    let mut maplen: i32;
 
                     if !mappings.is_empty() {
                         {
@@ -305,31 +303,10 @@ impl TwoSetStrategy {
                                 // write the PafRecord to the PAF file
                                 writer_lock.serialize(mapping)?;
 
-                                if self.remove_internal {
-                                    if mapping.strand == '+' {
-                                        overhang =
-                                            cmp::min(mapping.query_start, mapping.target_start)
-                                                + cmp::min(
-                                                    mapping.query_len - mapping.query_end,
-                                                    mapping.target_len - mapping.target_end,
-                                                );
-                                    } else {
-                                        overhang = cmp::min(
-                                            mapping.query_start,
-                                            mapping.target_len - mapping.target_end,
-                                        ) + cmp::min(
-                                            mapping.query_len - mapping.query_end,
-                                            mapping.target_start,
-                                        );
-                                    }
-                                    maplen = cmp::max(
-                                        mapping.query_end - mapping.query_start,
-                                        mapping.target_end - mapping.target_start,
-                                    );
-                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32
-                                    {
-                                        continue;
-                                    }
+                                if self.remove_internal
+                                    && mapping.is_internal(self.max_overhang_ratio)
+                                {
+                                    continue;
                                 }
                                 unique_overlaps.insert(mapping.target_name.clone());
                             }
