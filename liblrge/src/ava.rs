@@ -37,7 +37,6 @@
 //! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
 mod builder;
 
-use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::fs::File;
@@ -276,8 +275,6 @@ impl AvaStrategy {
 
                     {
                         let mut ovlap_counter_lock = ovlap_counter.lock().unwrap();
-                        let mut overhang: i32;
-                        let mut maplen: i32;
 
                         if !mappings.is_empty() {
                             let mut writer_lock = writer.lock().unwrap();
@@ -295,31 +292,10 @@ impl AvaStrategy {
                                     continue;
                                 }
 
-                                if self.remove_internal {
-                                    if mapping.strand == '+' {
-                                        overhang =
-                                            cmp::min(mapping.query_start, mapping.target_start)
-                                                + cmp::min(
-                                                    mapping.query_len - mapping.query_end,
-                                                    mapping.target_len - mapping.target_end,
-                                                );
-                                    } else {
-                                        overhang = cmp::min(
-                                            mapping.query_start,
-                                            mapping.target_len - mapping.target_end,
-                                        ) + cmp::min(
-                                            mapping.query_len - mapping.query_end,
-                                            mapping.target_start,
-                                        );
-                                    }
-                                    maplen = cmp::max(
-                                        mapping.query_end - mapping.query_start,
-                                        mapping.target_end - mapping.target_start,
-                                    );
-                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32
-                                    {
-                                        continue;
-                                    }
+                                if self.remove_internal
+                                    && mapping.is_internal(self.max_overhang_ratio)
+                                {
+                                    continue;
                                 }
 
                                 let pair = if &rid < tname {

@@ -1,4 +1,5 @@
 //! Data structure for PAF records along with serialization and deserialization methods.
+use std::cmp;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -50,6 +51,30 @@ pub(crate) struct PafRecord {
     /// Length of query regions harboring repetitive seeds
     #[serde(serialize_with = "serialize_rl", deserialize_with = "deserialize_tag")]
     pub rl: i32,
+}
+
+impl PafRecord {
+    /// Checks if the target or query read are internal to the other, within a specified overhang ratio.
+    /// This is used to filter out internal reads that are not useful for estimation.
+    pub(crate) fn is_internal(&self, max_overhang_ratio: f32) -> bool {
+        let overhang = if self.strand == '+' {
+            cmp::min(self.query_start, self.target_start)
+                + cmp::min(
+                    self.query_len - self.query_end,
+                    self.target_len - self.target_end,
+                )
+        } else {
+            cmp::min(self.query_start, self.target_len - self.target_end)
+                + cmp::min(self.query_len - self.query_end, self.target_start)
+        };
+        let maplen = cmp::max(
+            self.query_end - self.query_start,
+            self.target_end - self.target_start,
+        );
+
+        let overhang_ratio = overhang as f32 / maplen as f32;
+        overhang_ratio < max_overhang_ratio
+    }
 }
 
 /// Serialize `Vec<u8>` as a UTF-8 string
@@ -392,5 +417,77 @@ mod tests {
         let result = String::from_utf8(result).unwrap();
         let expected = "SRR28370649.1\t4402\t40\t237\t-\tSRR28370649.7311\t5094\t41\t238\t190\t197\t0\ttp:A:S\tcm:i:59\ts1:i:190\tdv:f:0\trl:i:56\n";
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_is_internal() {
+        let mapping = PafRecord {
+            query_name: b"SRR28370649.1".to_vec(),
+            query_len: 390,
+            query_start: 46,
+            query_end: 317,
+            strand: '+',
+            target_name: b"SRR28370649.7311".to_vec(),
+            target_len: 278,
+            target_start: 4,
+            target_end: 275,
+            match_len: 260,
+            block_len: 271,
+            mapq: 0,
+            tp: 'S',
+            cm: 77,
+            s1: 260,
+            dv: 0.0,
+            rl: 0,
+        };
+        assert!(mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn test_is_internal2() {
+        let mapping = PafRecord {
+            query_name: b"SRR28370649.1".to_vec(),
+            query_len: 298,
+            query_start: 1,
+            query_end: 297,
+            strand: '+',
+            target_name: b"SRR28370649.7311".to_vec(),
+            target_len: 398,
+            target_start: 54,
+            target_end: 350,
+            match_len: 276,
+            block_len: 296,
+            mapq: 0,
+            tp: 'S',
+            cm: 77,
+            s1: 260,
+            dv: 0.0,
+            rl: 0,
+        };
+        assert!(mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn test_is_internal3() {
+        let mapping = PafRecord {
+            query_name: b"SRR28370649.1".to_vec(),
+            query_len: 390,
+            query_start: 0,
+            query_end: 355,
+            strand: '+',
+            target_name: b"SRR28370649.7311".to_vec(),
+            target_len: 418,
+            target_start: 39,
+            target_end: 394,
+            match_len: 335,
+            block_len: 355,
+            mapq: 0,
+            tp: 'S',
+            cm: 77,
+            s1: 260,
+            dv: 0.0,
+            rl: 0,
+        };
+        assert!(!mapping.is_internal(0.05));
     }
 }

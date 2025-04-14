@@ -34,8 +34,8 @@ pub struct Args {
     pub platform: String,
 
     /// Exclude overlaps for internal matches
-    #[arg(short = 'F', long = "do-filter")]
-    pub do_filt: bool,
+    #[arg(short = 'F', long = "filter-contained")]
+    pub filter_contained: bool,
 
     /// Number of threads to use
     #[arg(short, long, value_name = "INT", default_value = "1")]

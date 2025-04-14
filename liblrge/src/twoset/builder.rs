@@ -87,9 +87,9 @@ impl Builder {
     }
 
     /// Set option for removing the overlaps representing internal matches
-    pub fn remove_internal(mut self, do_filt: bool, ratio: f32) -> Self {
-        self.remove_internal = do_filt;
-        if do_filt {
+    pub fn remove_internal(mut self, filter_contained: bool, ratio: f32) -> Self {
+        self.remove_internal = filter_contained;
+        if filter_contained {
             self.max_overhang_ratio = ratio;
         }
         self
