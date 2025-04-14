@@ -41,6 +41,7 @@
 //!
 //! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
 mod builder;
+use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::fs::File;
@@ -48,7 +49,6 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
-use std::cmp;
 
 use crossbeam_channel as channel;
 use log::{debug, trace, warn};
@@ -307,14 +307,27 @@ impl TwoSetStrategy {
 
                                 if self.remove_internal {
                                     if mapping.strand == '+' {
-                                        overhang = cmp::min(mapping.query_start, mapping.target_start) + 
-                                            cmp::min(mapping.query_len - mapping.query_end, mapping.target_len - mapping.target_end);
+                                        overhang =
+                                            cmp::min(mapping.query_start, mapping.target_start)
+                                                + cmp::min(
+                                                    mapping.query_len - mapping.query_end,
+                                                    mapping.target_len - mapping.target_end,
+                                                );
                                     } else {
-                                        overhang = cmp::min(mapping.query_start, mapping.target_len - mapping.target_end) + 
-                                            cmp::min(mapping.query_len - mapping.query_end, mapping.target_start);
+                                        overhang = cmp::min(
+                                            mapping.query_start,
+                                            mapping.target_len - mapping.target_end,
+                                        ) + cmp::min(
+                                            mapping.query_len - mapping.query_end,
+                                            mapping.target_start,
+                                        );
                                     }
-                                    maplen = cmp::max(mapping.query_end - mapping.query_start, mapping.target_end - mapping.target_start);
-                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32 {
+                                    maplen = cmp::max(
+                                        mapping.query_end - mapping.query_start,
+                                        mapping.target_end - mapping.target_start,
+                                    );
+                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32
+                                    {
                                         continue;
                                     }
                                 }
@@ -445,15 +458,18 @@ impl TwoSetStrategy {
                 LrgeError::ThreadError(format!("Error setting number of threads: {}", e))
             })?;
 
-        let mut read_lengths: HashMap<Vec<u8>, usize> = HashMap::with_capacity(self.query_num_reads);
-        let mut ovlap_counter: HashMap<Vec<u8>, usize> = HashMap::with_capacity(self.query_num_reads);
+        let mut read_lengths: HashMap<Vec<u8>, usize> =
+            HashMap::with_capacity(self.query_num_reads);
+        let mut ovlap_counter: HashMap<Vec<u8>, usize> =
+            HashMap::with_capacity(self.query_num_reads);
 
         for i in 0..self.query_num_reads {
             unsafe {
                 let qname: *mut ::std::os::raw::c_char =
                     (*((*(aln_wrapper.aligner.idx.unwrap())).seq.add(i))).name;
                 let qname = std::ffi::CStr::from_ptr(qname).to_bytes().to_vec();
-                let qlens: usize = (*((*(aln_wrapper.aligner.idx.unwrap())).seq.add(i))).len as usize;
+                let qlens: usize =
+                    (*((*(aln_wrapper.aligner.idx.unwrap())).seq.add(i))).len as usize;
                 // add to read_lengths
                 if read_lengths.insert(qname.clone(), qlens).is_some() {
                     return Err(LrgeError::DuplicateReadIdentifier(
@@ -512,19 +528,34 @@ impl TwoSetStrategy {
 
                                 if self.remove_internal {
                                     if mapping.strand == '+' {
-                                        overhang = cmp::min(mapping.query_start, mapping.target_start) + 
-                                            cmp::min(mapping.query_len - mapping.query_end, mapping.target_len - mapping.target_end);
+                                        overhang =
+                                            cmp::min(mapping.query_start, mapping.target_start)
+                                                + cmp::min(
+                                                    mapping.query_len - mapping.query_end,
+                                                    mapping.target_len - mapping.target_end,
+                                                );
                                     } else {
-                                        overhang = cmp::min(mapping.query_start, mapping.target_len - mapping.target_end) + 
-                                            cmp::min(mapping.query_len - mapping.query_end, mapping.target_start);
+                                        overhang = cmp::min(
+                                            mapping.query_start,
+                                            mapping.target_len - mapping.target_end,
+                                        ) + cmp::min(
+                                            mapping.query_len - mapping.query_end,
+                                            mapping.target_start,
+                                        );
                                     }
-                                    maplen = cmp::max(mapping.query_end - mapping.query_start, mapping.target_end - mapping.target_start);
-                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32 {
+                                    maplen = cmp::max(
+                                        mapping.query_end - mapping.query_start,
+                                        mapping.target_end - mapping.target_start,
+                                    );
+                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32
+                                    {
                                         continue;
                                     }
                                 }
 
-                                *ovlap_counter_lock.entry(mapping.target_name.clone()).or_insert(0) += 1;
+                                *ovlap_counter_lock
+                                    .entry(mapping.target_name.clone())
+                                    .or_insert(0) += 1;
                                 unique_overlaps.insert(mapping.target_name.clone());
                             }
                         }

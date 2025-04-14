@@ -111,7 +111,7 @@ impl Aligner {
     /// Set index batch_size '-I'
     pub fn with_index_size(mut self, batch: usize) -> Self {
         if batch > 0 {
-            self.idxopt.batch_size = batch as u64;    
+            self.idxopt.batch_size = batch as u64;
         } else {
             // set -I32G
             // self.idxopt.batch_size = 0x800000000;
