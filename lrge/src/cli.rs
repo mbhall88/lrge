@@ -129,10 +129,7 @@ fn validate_overhang_ratio(s: &str) -> Result<f32, String> {
     if (0.0..=1.0).contains(&value) {
         Ok(value)
     } else {
-        Err(format!(
-            "Value `{}` must be between 0.0 and 1.0",
-            s
-        ))
+        Err(format!("Value `{}` must be between 0.0 and 1.0", s))
     }
 }
 
