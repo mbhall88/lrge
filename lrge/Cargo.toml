@@ -18,5 +18,5 @@ log.workspace = true
 anyhow = "1.0.93"
 clap = { version = "4.5.20", features = ["derive"] }
 env_logger = "0.11.5"
-tempfile = "3.14.0"
+tempfile = "3.20.0"
 liblrge = { path = "../liblrge", version = "0.1.3" }
