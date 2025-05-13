@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 pub(crate) fn create_temp_dir(temp_dir: Option<&PathBuf>, keep: bool) -> Result<tempfile::TempDir> {
     let mut binding = tempfile::Builder::new();
-    let builder = binding.keep(keep).prefix("lrge-");
+    let builder = binding.disable_cleanup(keep).prefix("lrge-");
     let tmpdir = match temp_dir {
         Some(path) => {
             if !path.exists() {
