@@ -1,3 +1,19 @@
+## 0.2.0 ([[30c8e5d..12443d](https://github.com/mbhall88/lrge/compare/lrge-0.1.3...lrge-0.2.0))
+#### Bug Fixes
+- aviod minimap2 multi-part indexing - ([e5e9a77](https://github.com/mbhall88/lrge/commit/e5e9a773336638a8f57384d76913e34cae483a66)) - Chenxi Zhou
+#### Build system
+- **(deps)** update proc-macro2 for docs - ([cf5b55b](https://github.com/mbhall88/lrge/commit/cf5b55bd3bc9cdc4ed3b80007ed45076dd034002)) - [@mbhall88](https://github.com/mbhall88)
+- **(deps)** update deps - ([8b78ed1](https://github.com/mbhall88/lrge/commit/8b78ed110e967f09ed4481ec51dbdb25e4bf860f)) - [@mbhall88](https://github.com/mbhall88)
+#### Features
+- change default '--max-overhang-ratio' to 0.2 - ([eb941d4](https://github.com/mbhall88/lrge/commit/eb941d4a4f054eedc1681b126ee465948ace3c83)) - Chenxi Zhou
+- add option '--use-min-ref' for using smaller reference - ([4791ec0](https://github.com/mbhall88/lrge/commit/4791ec066dd204c97cd91884b473c3bcf50e2931)) - Chenxi Zhou
+- a more accurate calculation of per read estimation - ([5d2e211](https://github.com/mbhall88/lrge/commit/5d2e211e976ab7df9d3db05243175c9fda210b90)) - Chenxi Zhou
+- remove option --max-overhang-size - ([8753864](https://github.com/mbhall88/lrge/commit/875386408f7d718816a08bda6eb6398b22230bf0)) - Chenxi Zhou
+- use smaller dataset Q/T as reference - ([f4a4b73](https://github.com/mbhall88/lrge/commit/f4a4b73283062435c8ca8958e4fe71fd796371d7)) - Chenxi Zhou
+- add option '-F' to remove internal matches - ([b23a8c7](https://github.com/mbhall88/lrge/commit/b23a8c7fea82aff1344c4f108628cf6044245245)) - Chenxi Zhou
+#### Refactoring
+- testing for internal alignments is done on PafRecord - ([e5dbc3f](https://github.com/mbhall88/lrge/commit/e5dbc3f2454cbca1753a76aed0a884c703f2dea5)) - [@mbhall88](https://github.com/mbhall88)
+
 ## 0.1.3 ([2467dab..01de783](https://github.com/mbhall88/lrge/compare/2467dab..01de783))
 #### Bug Fixes
 - handle multi-member gzip compressed files - ([2412f4a](https://github.com/mbhall88/lrge/commit/2412f4ab52c9fd8baf3e310fd637f389228ac7f6)) - [@mbhall88](https://github.com/mbhall88) - fixes <https://github.com/gbouras13/hybracter/issues/110>
