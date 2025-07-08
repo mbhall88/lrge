@@ -194,10 +194,7 @@ pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> Vec<u32>
     };
 
     if k > n as usize {
-        panic!(
-            "Cannot generate {} unique values from a range of 0 to {}",
-            k, n
-        );
+        panic!("Cannot generate {k} unique values from a range of 0 to {n}",);
     }
 
     rand::seq::index::sample(&mut rng, n as usize, k)

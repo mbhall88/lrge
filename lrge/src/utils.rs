@@ -45,7 +45,7 @@ pub(crate) fn format_estimate(estimate: f32) -> String {
     }
 
     // Format the value with the determined suffix
-    format!("{:.2} {}", value, suffix)
+    format!("{value:.2} {suffix}",)
 }
 
 #[cfg(test)]

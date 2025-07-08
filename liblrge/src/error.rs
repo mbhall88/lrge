@@ -35,16 +35,16 @@ pub enum LrgeError {
 impl fmt::Display for LrgeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LrgeError::IoError(err) => write!(f, "IO error: {}", err),
-            LrgeError::FastqParseError(msg) => write!(f, "FASTQ parse error: {}", msg),
-            LrgeError::TooManyReadsError(msg) => write!(f, "Too many reads requested: {}", msg),
-            LrgeError::TooFewReadsError(msg) => write!(f, "Too few reads requested: {}", msg),
-            LrgeError::InvalidPlatform(msg) => write!(f, "Invalid platform: {}", msg),
-            LrgeError::ThreadError(msg) => write!(f, "Error relating to threads: {}", msg),
-            LrgeError::PafWriteError(msg) => write!(f, "Error writing PAF file: {}", msg),
-            LrgeError::MapError(msg) => write!(f, "Error mapping a read: {}", msg),
+            LrgeError::IoError(err) => write!(f, "IO error: {err}",),
+            LrgeError::FastqParseError(msg) => write!(f, "FASTQ parse error: {msg}",),
+            LrgeError::TooManyReadsError(msg) => write!(f, "Too many reads requested: {msg}",),
+            LrgeError::TooFewReadsError(msg) => write!(f, "Too few reads requested: {msg}",),
+            LrgeError::InvalidPlatform(msg) => write!(f, "Invalid platform: {msg}",),
+            LrgeError::ThreadError(msg) => write!(f, "Error relating to threads: {msg}",),
+            LrgeError::PafWriteError(msg) => write!(f, "Error writing PAF file: {msg}",),
+            LrgeError::MapError(msg) => write!(f, "Error mapping a read: {msg}",),
             LrgeError::DuplicateReadIdentifier(id) => {
-                write!(f, "Duplicate read identifier found: {}", id)
+                write!(f, "Duplicate read identifier found: {id}",)
             }
         }
     }

@@ -128,8 +128,7 @@ impl TwoSetStrategy {
 
         if n_fq_reads > u32::MAX as usize {
             let msg = format!(
-                "Number of reads in FASTQ file ({}) exceeds maximum allowed value ({})",
-                n_fq_reads,
+                "Number of reads in FASTQ file ({n_fq_reads}) exceeds maximum allowed value ({})",
                 u32::MAX
             );
             return Err(LrgeError::TooManyReadsError(msg));
@@ -139,8 +138,8 @@ impl TwoSetStrategy {
 
         if n_fq_reads <= self.query_num_reads {
             let msg = format!(
-                "Number of reads in FASTQ file ({}) is <= query number of reads ({})",
-                n_fq_reads, self.query_num_reads
+                "Number of reads in FASTQ file ({n_fq_reads}) is <= query number of reads ({})",
+                self.query_num_reads
             );
             return Err(LrgeError::TooFewReadsError(msg));
         } else if n_fq_reads < n_req_reads {
@@ -162,7 +161,7 @@ impl TwoSetStrategy {
 
         let reader = io::open_file(&self.input)?;
         let mut fastx_reader = parse_fastx_reader(reader).map_err(|e| {
-            LrgeError::FastqParseError(format!("Error parsing input FASTQ file: {}", e))
+            LrgeError::FastqParseError(format!("Error parsing input FASTQ file: {e}",))
         })?;
 
         debug!("Writing target and query reads to temporary files...");
@@ -176,14 +175,14 @@ impl TwoSetStrategy {
             let record = r.unwrap();
 
             if target_indices.remove(&idx) {
-                record.write(&mut target_writer, None).map_err(|e| {
-                    LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
-                })?;
+                record
+                    .write(&mut target_writer, None)
+                    .map_err(|e| LrgeError::IoError(std::io::Error::other(e)))?;
                 sum_target_len += record.num_bases();
             } else if query_indices.remove(&idx) {
-                record.write(&mut query_writer, None).map_err(|e| {
-                    LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
-                })?;
+                record
+                    .write(&mut query_writer, None)
+                    .map_err(|e| LrgeError::IoError(std::io::Error::other(e)))?;
                 sum_query_len += record.num_bases();
             }
 
@@ -224,7 +223,7 @@ impl TwoSetStrategy {
         // Producer: Read FASTQ records and send them to the channel
         let producer = std::thread::spawn(move || -> Result<(), LrgeError> {
             let mut fastx_reader = parse_fastx_file(query_file).map_err(|e| {
-                LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {}", e))
+                LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {e}",))
             })?;
 
             while let Some(record) = fastx_reader.next() {
@@ -238,8 +237,7 @@ impl TwoSetStrategy {
                     }
                     Err(e) => {
                         return Err(LrgeError::FastqParseError(format!(
-                            "Error parsing query FASTQ file: {}",
-                            e
+                            "Error parsing query FASTQ file: {e}",
                         )));
                     }
                 }
@@ -264,7 +262,7 @@ impl TwoSetStrategy {
             .num_threads(self.threads)
             .build()
             .map_err(|e| {
-                LrgeError::ThreadError(format!("Error setting number of threads: {}", e))
+                LrgeError::ThreadError(format!("Error setting number of threads: {e}",))
             })?;
 
         let estimates = Vec::with_capacity(self.query_num_reads);
@@ -282,15 +280,14 @@ impl TwoSetStrategy {
                     trace!("Processing read: {}", String::from_utf8_lossy(&rid));
 
                     let qname = CString::new(rid).map_err(|e| {
-                        LrgeError::MapError(format!("Error converting read ID to CString: {}", e))
+                        LrgeError::MapError(format!("Error converting read ID to CString: {e}",))
                     })?;
 
                     // Use the shared aligner to perform alignment
                     let mappings = aligner.map(&seq, Some(&qname)).map_err(|e| {
                         LrgeError::MapError(format!(
-                            "Error mapping read {}: {}",
+                            "Error mapping read {}: {e}",
                             String::from_utf8_lossy(qname.as_bytes()),
-                            e
                         ))
                     })?;
 
@@ -346,7 +343,7 @@ impl TwoSetStrategy {
 
         // Wait for the producer to finish
         producer.join().map_err(|e| {
-            LrgeError::ThreadError(format!("Thread panicked when joining: {:?}", e))
+            LrgeError::ThreadError(format!("Thread panicked when joining: {e:?}",))
         })??;
 
         debug!("Overlaps written to: {}", paf_path.to_string_lossy());
@@ -392,7 +389,7 @@ impl TwoSetStrategy {
         // Producer: Read FASTQ records and send them to the channel
         let producer = std::thread::spawn(move || -> Result<(), LrgeError> {
             let mut fastx_reader = parse_fastx_file(target_file).map_err(|e| {
-                LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {}", e))
+                LrgeError::FastqParseError(format!("Error parsing query FASTQ file: {e}",))
             })?;
 
             while let Some(record) = fastx_reader.next() {
@@ -406,8 +403,7 @@ impl TwoSetStrategy {
                     }
                     Err(e) => {
                         return Err(LrgeError::FastqParseError(format!(
-                            "Error parsing query FASTQ file: {}",
-                            e
+                            "Error parsing query FASTQ file: {e}",
                         )));
                     }
                 }
@@ -432,7 +428,7 @@ impl TwoSetStrategy {
             .num_threads(self.threads)
             .build()
             .map_err(|e| {
-                LrgeError::ThreadError(format!("Error setting number of threads: {}", e))
+                LrgeError::ThreadError(format!("Error setting number of threads: {e}",))
             })?;
 
         let mut read_lengths: HashMap<Vec<u8>, usize> =
@@ -475,15 +471,14 @@ impl TwoSetStrategy {
                     trace!("Processing read: {}", String::from_utf8_lossy(&rid));
 
                     let tname: CString = CString::new(rid.clone()).map_err(|e| {
-                        LrgeError::MapError(format!("Error converting read name to CString: {}", e))
+                        LrgeError::MapError(format!("Error converting read name to CString: {e}",))
                     })?;
 
                     // Use the shared aligner to perform alignment
                     let mappings = aligner.map(&seq, Some(&tname)).map_err(|e| {
                         LrgeError::MapError(format!(
-                            "Error mapping read {}: {}",
+                            "Error mapping read {}: {e}",
                             String::from_utf8_lossy(&rid),
-                            e
                         ))
                     })?;
 
@@ -545,7 +540,7 @@ impl TwoSetStrategy {
 
         // Wait for the producer to finish
         producer.join().map_err(|e| {
-            LrgeError::ThreadError(format!("Thread panicked when joining: {:?}", e))
+            LrgeError::ThreadError(format!("Thread panicked when joining: {e:?}",))
         })??;
 
         debug!("Overlaps written to: {}", paf_path.to_string_lossy());

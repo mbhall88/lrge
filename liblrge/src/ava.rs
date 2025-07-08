@@ -138,7 +138,7 @@ impl AvaStrategy {
         let out_file = self.tmpdir.join("reads.fq");
         let reader = io::open_file(&self.input)?;
         let mut fastx_reader = parse_fastx_reader(reader).map_err(|e| {
-            LrgeError::FastqParseError(format!("Error parsing input FASTQ file: {}", e))
+            LrgeError::FastqParseError(format!("Error parsing input FASTQ file: {e}"))
         })?;
 
         debug!("Writing subsampled reads to temporary files...");
@@ -150,9 +150,9 @@ impl AvaStrategy {
             let record = r.unwrap();
 
             if indices.remove(&idx) {
-                record.write(&mut writer, None).map_err(|e| {
-                    LrgeError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e))
-                })?;
+                record
+                    .write(&mut writer, None)
+                    .map_err(|e| LrgeError::IoError(std::io::Error::other(e)))?;
                 sum_len += record.num_bases();
             }
 
@@ -190,7 +190,7 @@ impl AvaStrategy {
         // Producer: Read FASTQ records and send them to the channel
         let producer = std::thread::spawn(move || -> Result<(), LrgeError> {
             let mut fastx_reader = parse_fastx_file(&reads_file).map_err(|e| {
-                LrgeError::FastqParseError(format!("Error parsing FASTQ file: {}", e))
+                LrgeError::FastqParseError(format!("Error parsing FASTQ file: {e}",))
             })?;
             let read_lengths = read_lengths_for_producer;
 
@@ -216,8 +216,7 @@ impl AvaStrategy {
                     }
                     Err(e) => {
                         return Err(LrgeError::FastqParseError(format!(
-                            "Error parsing query FASTQ file: {}",
-                            e
+                            "Error parsing query FASTQ file: {e}",
                         )));
                     }
                 }
@@ -242,7 +241,7 @@ impl AvaStrategy {
             .num_threads(self.threads)
             .build()
             .map_err(|e| {
-                LrgeError::ThreadError(format!("Error setting number of threads: {}", e))
+                LrgeError::ThreadError(format!("Error setting number of threads: {e}",))
             })?;
 
         let ovlap_counter: HashMap<Vec<u8>, usize> = HashMap::with_capacity(self.num_reads);
@@ -261,7 +260,7 @@ impl AvaStrategy {
                     trace!("Processing read: {}", String::from_utf8_lossy(&rid));
 
                     let qname = CString::new(rid.clone()).map_err(|e| {
-                        LrgeError::MapError(format!("Error converting read name to CString: {}", e))
+                        LrgeError::MapError(format!("Error converting read name to CString: {e}",))
                     })?;
 
                     // Use the shared aligner to perform alignment
@@ -324,7 +323,7 @@ impl AvaStrategy {
 
         // Wait for the producer to finish
         producer.join().map_err(|e| {
-            LrgeError::ThreadError(format!("Thread panicked when joining: {:?}", e))
+            LrgeError::ThreadError(format!("Thread panicked when joining: {e:?}",))
         })??;
 
         debug!("Overlaps written to: {}", paf_path.to_string_lossy());

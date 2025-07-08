@@ -141,7 +141,7 @@ where
     let value = if *value < f32::EPSILON {
         "0".to_string()
     } else {
-        format!("{:.4}", value)
+        format!("{value:.4}",)
     };
     serialize_tag_with_name("dv", &value, serializer)
 }
@@ -172,7 +172,7 @@ where
         prefix = "f";
     }
 
-    let formatted = format!("{}:{}:{}", name, prefix, value);
+    let formatted = format!("{name}:{prefix}:{value}",);
     serializer.serialize_str(&formatted)
 }
 

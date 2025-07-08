@@ -100,13 +100,12 @@ fn check_path_exists<S: AsRef<OsStr> + ?Sized>(s: &S) -> Result<PathBuf, String>
 fn validate_quantile(s: &str, min: f32, max: f32) -> Result<f32, String> {
     let value: f32 = s
         .parse()
-        .map_err(|_| format!("`{}` is not a valid number", s))?;
+        .map_err(|_| format!("`{s}` is not a valid number",))?;
     if value > min && value < max {
         Ok(value)
     } else {
         Err(format!(
-            "Value `{}` must be greater than {} and less than {}",
-            s, min, max
+            "Value `{s}` must be greater than {min} and less than {max}",
         ))
     }
 }
@@ -125,11 +124,11 @@ fn validate_high_quantile(s: &str) -> Result<f32, String> {
 fn validate_overhang_ratio(s: &str) -> Result<f32, String> {
     let value: f32 = s
         .parse()
-        .map_err(|_| format!("`{}` is not a valid number", s))?;
+        .map_err(|_| format!("`{s}` is not a valid number",))?;
     if (0.0..=1.0).contains(&value) {
         Ok(value)
     } else {
-        Err(format!("Value `{}` must be between 0.0 and 1.0", s))
+        Err(format!("Value `{s}` must be between 0.0 and 1.0",))
     }
 }
 
