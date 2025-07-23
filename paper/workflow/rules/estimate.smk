@@ -1,5 +1,5 @@
 def lrge_opts(wildcards):
-    opts = ["-v"]
+    opts = ["-vv"]
 
     seed = config["lrge"].get("seed")
     if seed is not None:

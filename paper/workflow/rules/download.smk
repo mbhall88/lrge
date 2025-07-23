@@ -2,6 +2,7 @@ rule download:
     output:
         fastq=temp(RESULTS / "downloads/{dir1}/{dir2}/{dir3}/{run}/{run}.fastq.gz"),
         stats=RESULTS / "stats/{dir1}/{dir2}/{dir3}/{run}.stats.tsv",
+        info=RESULTS / "stats/{dir1}/{dir2}/{dir3}/{run}.info.tsv",
     log:
         LOGS / "download/{dir1}/{dir2}/{dir3}/{run}.log",
     # group:

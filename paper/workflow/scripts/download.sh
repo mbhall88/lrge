@@ -61,6 +61,7 @@ rasusa reads -s $seed -b $max_bases -O u "$clean_fastq" | seqkit rename -o "$out
 
 # get stats for the fastq file
 tmpstats=$(mktemp)
+tmpinfo=$(mktemp)
 seqkit stats -aT "$output" > "$tmpstats"
 
 # get the 5th column from the second row of the stats file, which is the number of bases
@@ -72,4 +73,8 @@ if [ $num_bases -lt $min_bases ]; then
     exit 1
 fi
 
+# get read length and quality for each read
+seqkit fx2tab -nilqH "$output" > "$tmpinfo"
+
 mv "$tmpstats" "${snakemake_output[stats]}"
+mv "$tmpinfo" "${snakemake_output[info]}"

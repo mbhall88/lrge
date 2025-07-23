@@ -53,11 +53,22 @@ for p in map(Path, snakemake.input.stats):
     stats[run] = df.iloc[0].to_list()
 
 rows = []
+bad_runs = []
+failed = False
+
 for p in map(Path, snakemake.input.benchmarks):
     run = p.name.split(".")[0]
     method = p.parts[-5]
     estimate_file = estimates[(run, method)]
-    est = float(estimate_file.read_text().strip())
+    est = estimate_file.read_text().strip()
+    try:
+        est = float(est)
+    except ValueError:
+        print(f"estimate is empty for {run}", file=sys.stderr)
+        failed = True
+        bad_runs.append(run)
+        continue
+
     true_size = samplesheet.loc[run, "true_size"]
 
     # samplesheet.loc[run, "estimate"] = est
@@ -84,6 +95,12 @@ for p in map(Path, snakemake.input.benchmarks):
     row.extend(stats[run])
 
     rows.append(row)
+
+if failed:
+    print("Failed to read estimates for the following runs:", file=sys.stderr)
+    for r in bad_runs:
+        print(r, file=sys.stderr)
+    sys.exit(1)
 
 outsheet = pd.DataFrame(
     rows,
