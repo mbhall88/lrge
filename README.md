@@ -171,7 +171,10 @@ By default, LRGE uses the [two-set strategy](#two-set-strategy) with 10,000 targ
 
 In [the paper][doi], we ran LRGE on three eukaoryotic genomes: *Arabidopsis thaliana* (125 Mbp), *Drosophila melanogaster* 
 (143 Mbp), and *Saccharomyces cerevisiae* (12 Mbp). We used 50,000 query and 100,000 target reads for *A. thaliana* and 
-*D. melanogaster*, and 10,000 query and 20,000 target reads for *S. cerevisiae*.
+*D. melanogaster*, and 10,000 query and 20,000 target reads for *S. cerevisiae*. For *H. sapiens* we used 100,000 query and 2,000,000 targets reads.
+As genome size increases, more reads are needed to obtain sufficient overlaps for accurate estimation. While there’s no strict rule, 
+we scaled the number of reads by the approximate order of magnitude difference between bacterial and eukaryotic genomes. 
+LRGE’s defaults are calibrated for bacteria, so multiplying these by the expected genome size ratio is a good starting point. 
 
 
 ### Library
