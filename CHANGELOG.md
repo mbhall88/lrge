@@ -1,3 +1,14 @@
+## 0.2.1 ([12443db..14061b7](https://github.com/mbhall88/lrge/compare/lrge-0.2.0...lrge-0.2.1))
+#### Bug Fixes
+- **(liblrge)** change warn logging to info for no overlaps - ([2a11150](https://github.com/mbhall88/lrge/commit/2a11150fe39bec395d9780570d9df84641e03b00)) - [@mbhall88](https://github.com/mbhall88)
+#### Build system
+- **(liblrge)** update crossbeam - ([bb24d78](https://github.com/mbhall88/lrge/commit/bb24d7829a63aa8cd7a9adaaadd5c36d50f5e9ce)) - [@mbhall88](https://github.com/mbhall88)
+#### CI
+- **(deps)** bump actions/attest-build-provenance from 2 to 3 (#11) - ([53023f8](https://github.com/mbhall88/lrge/commit/53023f8f16f96eb842596131dd321f372a2b9322)) - dependabot[bot]
+- **(deps)** bump actions/checkout from 4 to 5 (#9) - ([1faca39](https://github.com/mbhall88/lrge/commit/1faca39cf3494e2108e2f69897142aa20f35b784)) - dependabot[bot]
+#### Documentation
+- add guidance for selecting readset sizes - ([bc30ba0](https://github.com/mbhall88/lrge/commit/bc30ba0c78bee5f559aaf7f3b5b843a128370e43)) - [@mbhall88](https://github.com/mbhall88)
+
 ## 0.2.0 ([[30c8e5d..12443d](https://github.com/mbhall88/lrge/compare/lrge-0.1.3...lrge-0.2.0))
 #### Bug Fixes
 - aviod minimap2 multi-part indexing - ([e5e9a77](https://github.com/mbhall88/lrge/commit/e5e9a773336638a8f57384d76913e34cae483a66)) - Chenxi Zhou
