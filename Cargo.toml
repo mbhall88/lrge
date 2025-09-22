@@ -7,7 +7,7 @@ resolver = "2"
 
 [workspace.package]
 description = "Genome size estimation from long read overlaps"
-authors = ["Michael Hall <michael@mbh.sh>"]
+authors = ["Michael Hall <mhaldini@icloud.com>"]
 edition = "2021"
 repository = "https://github.com/mbhall88/lrge"
 homepage = "https://github.com/mbhall88/lrge"
