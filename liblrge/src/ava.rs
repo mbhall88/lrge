@@ -46,7 +46,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use crossbeam_channel as channel;
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use needletail::{parse_fastx_file, parse_fastx_reader};
 use rayon::prelude::*;
 
@@ -365,7 +365,7 @@ impl AvaStrategy {
 
         if no_mapping_count > 0 {
             let percent = (no_mapping_count as f32 / self.num_reads as f32) * 100.0;
-            warn!(
+            info!(
                 "{} ({:.2}%) read(s) did not overlap any other reads",
                 no_mapping_count, percent
             );
