@@ -9,7 +9,7 @@
 LRGE (pronounced "large") is a command line tool for estimating genome size from long read overlaps. The tool is built 
 on top of the [`liblrge`][liblrge] Rust library, which is also available as a standalone library for use in other projects.
 
-> Hall, M. B.; Coin, L. J. M. Genome Size Estimation from Long Read Overlaps. bioRxiv 2024, 2024.11.27.625777. doi:[10.1101/2024.11.27.625777][doi].
+> Michael B Hall, Chenxi Zhou, Lachlan J M Coin, Genome size estimation from long read overlaps, *Bioinformatics*, Volume 41, Issue 11, November 2025, btaf593, doi: [10.1093/bioinformatics/btaf593][doi]
 
 ## Table of Contents
 
@@ -454,21 +454,26 @@ You can find the full details of how we compared methods in the [workflow](./pap
 If you use LRGE in your research, please cite the following [paper][doi]:
 
 ```bibtex
-@article{hall_genome_2024,
+
+@article{hall_genome_2025,
 	title = {Genome size estimation from long read overlaps},
-	url = {https://biorxiv.org/content/early/2024/12/02/2024.11.27.625777.abstract},
-	doi = {10.1101/2024.11.27.625777},
-	journal = {bioRxiv},
-	author = {Hall, Michael B and Coin, Lachlan J M},
-	month = jan,
-	year = {2024},
-	pages = {2024.11.27.625777},
+	volume = {41},
+	issn = {1367-4811},
+	url = {https://doi.org/10.1093/bioinformatics/btaf593},
+	doi = {10.1093/bioinformatics/btaf593},
+	number = {11},
+	journal = {Bioinformatics},
+	author = {Hall, Michael B and Zhou, Chenxi and Coin, Lachlan J M},
+	month = nov,
+	year = {2025},
+	pages = {btaf593},
 }
+
 ```
 
 [apptainer]: https://github.com/apptainer/apptainer
 [docker]: https://docs.docker.com/
-[doi]: https://doi.org/10.1101/2024.11.27.625777
+[doi]: https://doi.org/10.1093/bioinformatics/btaf593
 [ghcr]: https://github.com/mbhall88/lrge/pkgs/container/lrge
 [liblrge]: https://www.docs.rs/liblrge
 [quay.io]: https://quay.io/repository/mbhall88/lrge
