@@ -2,7 +2,7 @@
 
 [![check](https://github.com/mbhall88/lrge/actions/workflows/check.yml/badge.svg)](https://github.com/mbhall88/lrge/actions/workflows/check.yml)
 [![test](https://github.com/mbhall88/lrge/actions/workflows/test.yml/badge.svg)](https://github.com/mbhall88/lrge/actions/workflows/test.yml)
-[![DOI:10.1101/2024.11.27.625777](https://img.shields.io/badge/citation-10.1101/2024.11.27.625777-blue)][doi]
+[![DOI:10.1093/bioinformatics/btaf593](https://img.shields.io/badge/citation-10.1101/2024.11.27.625777-blue)][doi]
 
 **L**ong **R**ead-based **G**enome size **E**stimation from overlaps
 
