@@ -1,0 +1,121 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: LRGE
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Michael
+    name-particle: B
+    family-names: Hall
+    affiliation: >-
+      Department of Microbiology and Immunology, The
+      University of Melbourne, at the Peter Doherty
+      Institute for Infection and Immunity, Melbourne,
+      Australia
+    orcid: 'https://orcid.org/0000-0003-3683-6208'
+  - given-names: Chenxi
+    family-names: Zhou
+    affiliation: >-
+      Department of Genetics, The University of Cambridge,
+      Cambridge, United Kingdom
+    orcid: 'https://orcid.org/0000-0002-1735-2630'
+  - given-names: Lachlan
+    name-particle: JM
+    family-names: Coin
+    affiliation: >-
+      Department of Microbiology and Immunology, The
+      University of Melbourne, at the Peter Doherty
+      Institute for Infection and Immunity, Melbourne,
+      Australia
+    orcid: 'https://orcid.org/0000-0002-4300-455X'
+identifiers:
+  - type: doi
+    value: 10.1093/bioinformatics/btaf593
+    description: Journal article describing the work
+repository-code: 'https://github.com/mbhall88/lrge'
+abstract: >-
+  Motivation
+
+
+  Accurate genome size estimation is an important component
+  of genomic analyses such as assembly and coverage
+  calculation, though existing tools are primarily optimized
+  for short-read data.
+
+  Results
+
+
+  We present LRGE, a novel tool that uses read-to-read
+  overlap information to estimate genome size in a
+  reference-free manner. LRGE calculates per-read genome
+  size estimates by analysing the expected number of
+  overlaps for each read, considering read lengths and a
+  minimum overlap threshold. The final size is taken as the
+  median of these estimates, ensuring robustness to outliers
+  such as reads with no overlaps. Additionally, LRGE
+  provides an expected confidence range for the estimate. We
+  validate LRGE on a large, diverse bacterial dataset and
+  confirm it generalizes to eukaryotic datasets. On
+  bacterial genomes, LRGE outperforms k-mer-based methods in
+  both accuracy and computational efficiency and produces
+  genome size estimates comparable to those from
+  assembly-based approaches, like Raven, while using
+  significantly less computational resources.
+
+  Availability and implementation
+
+
+  Our method, LRGE (Long Read-based Genome size Estimation
+  from overlaps), is implemented in Rust and is available as
+  a precompiled binary for most architectures, a Bioconda
+  package, a prebuilt container image, and a crates.io
+  package as a binary (lrge) or library (liblrge). The
+  source code is available at
+  https://github.com/mbhall88/lrge and an archive at
+  https://doi.org/10.5281/zenodo.17183812 under an MIT
+  license.
+keywords:
+  - bioinformatics
+  - genome size
+  - estimation
+  - overlaps
+license: MIT
+preferred-citation:
+  type: article
+  authors:
+    - given-names: Michael
+      name-particle: B
+      family-names: Hall
+      affiliation: >-
+        Department of Microbiology and Immunology, The
+        University of Melbourne, at the Peter Doherty
+        Institute for Infection and Immunity, Melbourne,
+        Australia
+      orcid: 'https://orcid.org/0000-0003-3683-6208'
+    - given-names: Chenxi
+      family-names: Zhou
+      affiliation: >-
+        Department of Genetics, The University of Cambridge,
+        Cambridge, United Kingdom
+      orcid: 'https://orcid.org/0000-0002-1735-2630'
+    - given-names: Lachlan
+      name-particle: JM
+      family-names: Coin
+      affiliation: >-
+        Department of Microbiology and Immunology, The
+        University of Melbourne, at the Peter Doherty
+        Institute for Infection and Immunity, Melbourne,
+        Australia
+      orcid: 'https://orcid.org/0000-0002-4300-455X'
+  doi: "10.1093/bioinformatics/btaf593"
+  journal: "Bioinformatics"
+  month: 11
+  start: btaf593
+  title: "Genome size estimation from long read overlaps"
+  issue: 11
+  volume: 41
+  year: 2025
