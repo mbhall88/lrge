@@ -53,7 +53,7 @@ jobs:
       - name: Install cross
         uses: taiki-e/install-action@v2
         with:
-          tool: cross@0.2.5
+          tool: cross
 
       - name: Build with cross
         run: cross build --release --target=${{ matrix.job.target }}

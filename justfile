@@ -1,4 +1,4 @@
-PROJECT := "rasusa"
+PROJECT := "lrge"
 
 # run clippy to check for linting issues
 lint:
