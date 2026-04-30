@@ -38,9 +38,9 @@ on top of the [`liblrge`][liblrge] Rust library, which is also available as a st
 ![GitHub Release](https://img.shields.io/github/v/release/mbhall88/lrge)
 
 ```shell
-curl -sSL lrge.mbh.sh | sh
+curl -sSL https://github.com/mbhall88/lrge/releases/latest/download/install.sh | sh
 # or with wget
-wget -nv -O - lrge.mbh.sh | sh
+wget -nv -O - https://github.com/mbhall88/lrge/releases/latest/download/install.sh | sh
 ```
 
 You can also pass options to the script like so

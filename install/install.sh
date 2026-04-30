@@ -52,47 +52,59 @@ verify_shell_is_posix_or_exit() {
   fi
 }
 
-# Gets path to a temporary file, even if
+# Gets path to a temporary file
 get_tmpfile() {
   suffix="$1"
   if has mktemp; then
-    printf "%s.%s" "$(mktemp)" "${suffix}"
+    mktemp -t "${PROJECT}.XXXXXX.${suffix}"
   else
-    # No really good options here--let's pick a default + hope
-    printf "/tmp/${PROJECT}.%s" "${suffix}"
+    # Fallback to a PID-based filename if mktemp is unavailable
+    printf "/tmp/%s.%s.%s" "${PROJECT}" "$$" "${suffix}"
   fi
 }
 
 # Makes a temporary directory
 get_tmpdir() {
   if has mktemp; then
-    printf "%s" "$(mktemp -d)"
+    mktemp -d -t "${PROJECT}.XXXXXX"
   else
-    # No really good options here--let's pick a default + hope
-    printf "%s" "/tmp/${PROJECT}"
+    dir="/tmp/${PROJECT}.$$"
+    mkdir -p "$dir"
+    printf "%s" "$dir"
   fi
 }
 
 # Gets the latest github release tag (version)
-get_tag_from_github() {
-  ver=$(wget -qO - "https://api.github.com/repos/${GH_USER}/${PROJECT}/releases/latest" |
-    grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-  echo "$ver"
-}
-
-# Gets the latest github release version from the tag
-get_version_from_tag() {
-  tag="$1"
-  ver=$(echo "$tag" | sed -E "s|$PROJECT-([0-9]+\.[0-9]+\.[0-9]+)|\1|")
+get_version_from_github() {
+  tmp_json=$(get_tmpfile "json")
+  
+  if has curl; then
+    curl --fail --silent --location --output "$tmp_json" "https://api.github.com/repos/${GH_USER}/${PROJECT}/releases/latest"
+  elif has wget; then
+    wget --quiet --output-document="$tmp_json" "https://api.github.com/repos/${GH_USER}/${PROJECT}/releases/latest"
+  elif has fetch; then
+    fetch --quiet --output="$tmp_json" "https://api.github.com/repos/${GH_USER}/${PROJECT}/releases/latest"
+  else
+    error "No HTTP download program (curl, wget, fetch) found, exiting…"
+    exit 1
+  fi
+  
+  ver=$(grep '"tag_name":' "$tmp_json" | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+  rm -f "$tmp_json"
+  
+  if [ -z "$ver" ]; then
+    error "Could not parse version from GitHub API response"
+    exit 1
+  fi
   echo "$ver"
 }
 
 # Test if a location is writeable by trying to write to it. Windows does not let
 # you test writeability other than by writing: https://stackoverflow.com/q/1999988
 test_writeable() {
-  path="${1:-}/test.txt"
-  if touch "${path}" 2>/dev/null; then
-    rm "${path}"
+  path="${1:-}"
+  if [ -d "$path" ] && touch "${path}/.${PROJECT}_test" 2>/dev/null; then
+    rm "${path}/.${PROJECT}_test"
     return 0
   else
     return 1
@@ -114,6 +126,11 @@ download() {
     return 1
   fi
 
+  if [ -n "${DRY_RUN-}" ]; then
+    info "[Dry-run] Would run: $cmd"
+    return 0
+  fi
+
   $cmd && return 0 || rc=$?
 
   error "Command failed (exit code $rc): ${BLUE}${cmd}${NO_COLOR}"
@@ -131,16 +148,24 @@ unpack() {
   temp_dir=$(get_tmpdir)
   sudo=${3-}
 
+  if [ -n "${DRY_RUN-}" ]; then
+    info "[Dry-run] Would unpack $archive to $bin_dir using $sudo"
+    return 0
+  fi
+
   case "$archive" in
   *.tar.gz)
     flags=$(test -n "${VERBOSE-}" && echo "-xzvof" || echo "-xzof")
-    ${sudo} tar "${flags}" "${archive}" -C "${temp_dir}"
-    ${sudo} mv "${temp_dir}"/${PROJECT}-*/${PROJECT} "${bin_dir}/${PROJECT}"
+    ${sudo} tar "${flags}" "${archive}" -C "${temp_dir}" --strip-components=1
+    ${sudo} mv "${temp_dir}/${PROJECT}" "${bin_dir}/${PROJECT}"
+    rm -rf "${temp_dir}"
     return 0
     ;;
   *.zip)
     flags=$(test -z "${VERBOSE-}" && echo "-qqo" || echo "-o")
     UNZIP="${flags}" ${sudo} unzip "${archive}" -d "${temp_dir}"
+    ${sudo} find "${temp_dir}" -name "${PROJECT}" -type f -exec mv {} "${bin_dir}/${PROJECT}" \;
+    rm -rf "${temp_dir}"
     return 0
     ;;
   esac
@@ -162,6 +187,7 @@ usage() {
   printf "\n%s\n" "Options"
   printf "\t%s\n\t\t%s\n\n" \
     "-V, --verbose" "Enable verbose output for the installer" \
+    "-d, --dry-run" "Display the actions that would be taken without performing them" \
     "-f, -y, --force, --yes" "Skip the confirmation prompt during installation" \
     "-p, --platform" "Override the platform identified by the installer [default: ${PLATFORM}]" \
     "-b, --bin-dir" "Override the bin installation directory [default: ${BIN_DIR}]" \
@@ -178,10 +204,60 @@ elevate_priv() {
     info "sudo."
     exit 1
   fi
+  
+  if [ -n "${DRY_RUN-}" ]; then
+    info "[Dry-run] Would elevate privileges using sudo"
+    return 0
+  fi
+
   if ! sudo -v; then
     error "Superuser not granted, aborting installation"
     exit 1
   fi
+}
+
+verify_checksum() {
+  archive=$1
+  url=$2
+  
+  if [ -n "${DRY_RUN-}" ]; then
+    info "[Dry-run] Would verify checksum for $archive using ${url}.sha256"
+    return 0
+  fi
+
+  checksum_file=$(get_tmpfile "sha256")
+  if ! download "$checksum_file" "${url}.sha256"; then
+    warn "Could not download checksum file. Skipping verification."
+    rm -f "$checksum_file"
+    return 0
+  fi
+
+  info "Verifying checksum…"
+  if has sha256sum; then
+    (cd "$(dirname "$archive")" && sha256sum -c "$checksum_file") >/dev/null 2>&1
+  elif has shasum; then
+    (cd "$(dirname "$archive")" && shasum -a 256 -c "$checksum_file") >/dev/null 2>&1
+  elif has openssl; then
+    expected_hash=$(awk '{print $1}' "$checksum_file")
+    actual_hash=$(openssl dgst -sha256 "$archive" | awk '{print $NF}')
+    if [ "$expected_hash" != "$actual_hash" ]; then
+      error "Checksum verification failed!"
+      exit 1
+    fi
+  else
+    warn "No checksum verification tool found. Skipping verification."
+    rm -f "$checksum_file"
+    return 0
+  fi
+
+  if [ $? -ne 0 ]; then
+    error "Checksum verification failed! The downloaded file may be corrupted or tampered with."
+    rm -f "$checksum_file"
+    exit 1
+  fi
+
+  completed "Checksum verified"
+  rm -f "$checksum_file"
 }
 
 install() {
@@ -202,10 +278,21 @@ install() {
   archive=$(get_tmpfile "$ext")
 
   # download to the temp file
-  download "${archive}" "${url}"
+  if ! download "${archive}" "${url}"; then
+    rm -f "${archive}"
+    exit 1
+  fi
+
+  # verify checksum
+  verify_checksum "${archive}" "${url}"
 
   # unpack the temp file to the bin dir, using sudo if required
-  unpack "${archive}" "${BIN_DIR}" "${sudo}"
+  if ! unpack "${archive}" "${BIN_DIR}" "${sudo}"; then
+    rm -f "${archive}"
+    exit 1
+  fi
+  
+  rm -f "${archive}"
 }
 
 # Currently supporting:
@@ -381,6 +468,10 @@ while [ "$#" -gt 0 ]; do
     VERBOSE=1
     shift 1
     ;;
+  -d | --dry-run)
+    DRY_RUN=1
+    shift 1
+    ;;
   -f | -y | --force | --yes)
     FORCE=1
     shift 1
@@ -408,6 +499,10 @@ while [ "$#" -gt 0 ]; do
     ;;
   -V=* | --verbose=*)
     VERBOSE="${1#*=}"
+    shift 1
+    ;;
+  -d=* | --dry-run=*)
+    DRY_RUN="${1#*=}"
     shift 1
     ;;
   -f=* | -y=* | --force=* | --yes=*)
@@ -447,10 +542,14 @@ if [ "${PLATFORM}" = "pc-windows-msvc" ]; then
   EXT=zip
 fi
 
-TAG=$(get_tag_from_github)
-URL="${BASE_URL}/download/${TAG}/${TAG}-${TARGET}.${EXT}"
+VERSION=$(get_version_from_github)
+# If VERSION starts with PROJECT-, then don't prepend PROJECT-
+if echo "${VERSION}" | grep -q "^${PROJECT}-"; then
+  URL="${BASE_URL}/latest/download/${VERSION}-${TARGET}.${EXT}"
+else
+  URL="${BASE_URL}/latest/download/${PROJECT}-${VERSION}-${TARGET}.${EXT}"
+fi
 info "Tarball URL: ${UNDERLINE}${BLUE}${URL}${NO_COLOR}"
-VERSION=$(get_version_from_tag "${TAG}")
 confirm "Install $PROJECT ${GREEN}v${VERSION} (latest)${NO_COLOR} to ${BOLD}${GREEN}${BIN_DIR}${NO_COLOR}?"
 check_bin_dir "${BIN_DIR}"
 
