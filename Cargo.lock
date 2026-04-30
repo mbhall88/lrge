@@ -448,12 +448,13 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "minimap2-sys"
-version = "0.1.20+minimap2.2.28"
+version = "0.1.30+minimap2.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47d31565115502ac93fd101537bc1d6e32e56dd51538c42c82b927a3d58dad42"
+checksum = "a0daecfcba542b29dab8ae9516581fa3595bb5a3704389ab5a7ed3ee6aacea58"
 dependencies = [
  "cc",
  "libz-sys",
+ "paste",
  "pkg-config",
 ]
 
@@ -482,6 +483,12 @@ name = "once_cell"
 version = "1.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
+
+[[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pkg-config"
