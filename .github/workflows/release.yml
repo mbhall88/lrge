@@ -6,6 +6,7 @@ on:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
       - "lrge-[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
 
 env:
   CICD_INTERMEDIATES_DIR: "_release-intermediates"
