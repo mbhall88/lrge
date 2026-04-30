@@ -12,3 +12,4 @@ paper/*.csv*
 
 tmp/
 .DS_Store
+docs/superpowers/
