@@ -30,8 +30,8 @@ noodles-util = { version = "0.78.0", features = ["alignment"], optional = true }
 # for compression support
 flate2 = { version = "1.0.34", optional = true, package = "flate2" }
 zstd = { version = "0.13.2", optional = true }
-bzip2 = { version = "0.4.4", optional = true }
-liblzma = { version = "0.3.5", optional = true, package = "liblzma" }
+bzip2 = { version = "0.6.1", optional = true }
+liblzma = { version = "0.4.5", optional = true, package = "liblzma" }
 
 [features]
 compression = ["gzip", "zstd", "bzip2", "xz"]  # Enable compression support
