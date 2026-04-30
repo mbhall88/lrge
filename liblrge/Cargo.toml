@@ -24,6 +24,8 @@ crossbeam-channel = "0.5.15"
 rayon = "1.10.0"
 serde = { version = "1.0.215", features = ["derive"] }
 csv = "1.3.1"
+noodles = { version = "0.109.0", features = ["bam", "cram", "core", "sam"], optional = true }
+noodles-util = { version = "0.78.0", features = ["alignment"], optional = true }
 
 # for compression support
 flate2 = { version = "1.0.34", optional = true, package = "flate2" }
@@ -33,9 +35,11 @@ liblzma = { version = "0.3.5", optional = true, package = "liblzma" }
 
 [features]
 compression = ["gzip", "zstd", "bzip2", "xz"]  # Enable compression support
-default = ["compression"]  # Enable compression by default
+alignment = ["noodles", "noodles-util"]
+default = ["compression", "alignment"]  # Enable compression and alignment by default
 xz = ["liblzma"]  # Alias "xz" to "liblzma" dependency
 gzip = ["flate2"]  # Alias "gzip" to "flate2" dependency
 
 [dev-dependencies]
 env_logger = "0.11.5"  # for documentation tests
+tempfile = "3.10.1"

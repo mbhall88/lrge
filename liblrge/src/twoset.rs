@@ -40,6 +40,7 @@
 //! `overlaps.paf`.
 //!
 //! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
+use std::io::Write;
 mod builder;
 use std::cmp;
 use std::collections::{HashMap, HashSet};
@@ -52,7 +53,7 @@ use std::sync::{Arc, Mutex};
 
 use crossbeam_channel as channel;
 use log::{debug, info, trace, warn};
-use needletail::{parse_fastx_file, parse_fastx_reader};
+use needletail::parse_fastx_file;
 use rayon::prelude::*;
 
 pub use self::builder::Builder;
@@ -119,16 +120,13 @@ impl TwoSetStrategy {
     }
 
     fn split_fastq(&mut self) -> crate::Result<(PathBuf, PathBuf, f32)> {
-        debug!("Counting records in FASTQ file...");
-        let n_fq_reads = {
-            let mut reader = io::open_file(&self.input)?;
-            io::count_fastq_records(&mut reader)?
-        };
-        debug!("Found {} reads in FASTQ file", n_fq_reads);
+        debug!("Counting records in input file...");
+        let n_fq_reads = io::count_records(&self.input)?;
+        debug!("Found {} reads in input file", n_fq_reads);
 
         if n_fq_reads > u32::MAX as usize {
             let msg = format!(
-                "Number of reads in FASTQ file ({n_fq_reads}) exceeds maximum allowed value ({})",
+                "Number of reads in input file ({n_fq_reads}) exceeds maximum allowed value ({})",
                 u32::MAX
             );
             return Err(LrgeError::TooManyReadsError(msg));
@@ -138,13 +136,13 @@ impl TwoSetStrategy {
 
         if n_fq_reads <= self.query_num_reads {
             let msg = format!(
-                "Number of reads in FASTQ file ({n_fq_reads}) is <= query number of reads ({})",
+                "Number of reads in input file ({n_fq_reads}) is <= query number of reads ({})",
                 self.query_num_reads
             );
             return Err(LrgeError::TooFewReadsError(msg));
         } else if n_fq_reads < n_req_reads {
             warn!(
-                "Number of reads in FASTQ file ({}) is less than the sum of target and query reads ({})",
+                "Number of reads in input file ({}) is less than the sum of target and query reads ({})",
                 n_fq_reads, n_req_reads
             );
             self.target_num_reads = n_fq_reads - self.query_num_reads;
@@ -156,13 +154,8 @@ impl TwoSetStrategy {
         let (mut target_indices, mut query_indices) =
             split_into_hashsets(indices, self.target_num_reads);
 
-        let target_file = self.tmpdir.join("target.fq");
-        let query_file = self.tmpdir.join("query.fq");
-
-        let reader = io::open_file(&self.input)?;
-        let mut fastx_reader = parse_fastx_reader(reader).map_err(|e| {
-            LrgeError::FastqParseError(format!("Error parsing input FASTQ file: {e}",))
-        })?;
+        let target_file = self.tmpdir.join("target.fa");
+        let query_file = self.tmpdir.join("query.fa");
 
         debug!("Writing target and query reads to temporary files...");
         let mut target_writer = File::create(&target_file).map(BufWriter::new)?;
@@ -170,28 +163,31 @@ impl TwoSetStrategy {
         let mut sum_target_len = 0;
         let mut sum_query_len: usize = 0;
         let mut idx: u32 = 0;
-        while let Some(r) = fastx_reader.next() {
-            // we can unwrap here because we know the file is valid from when we counted the records
-            let record = r.unwrap();
 
+        io::iter_records(&self.input, |id, seq| {
             if target_indices.remove(&idx) {
-                record
-                    .write(&mut target_writer, None)
-                    .map_err(|e| LrgeError::IoError(std::io::Error::other(e)))?;
-                sum_target_len += record.num_bases();
+                target_writer.write_all(b">")?;
+                target_writer.write_all(id)?;
+                target_writer.write_all(b"\n")?;
+                target_writer.write_all(seq)?;
+                target_writer.write_all(b"\n")?;
+                sum_target_len += seq.len();
             } else if query_indices.remove(&idx) {
-                record
-                    .write(&mut query_writer, None)
-                    .map_err(|e| LrgeError::IoError(std::io::Error::other(e)))?;
-                sum_query_len += record.num_bases();
-            }
-
-            if target_indices.is_empty() && query_indices.is_empty() {
-                break;
+                query_writer.write_all(b">")?;
+                query_writer.write_all(id)?;
+                query_writer.write_all(b"\n")?;
+                query_writer.write_all(seq)?;
+                query_writer.write_all(b"\n")?;
+                sum_query_len += seq.len();
             }
 
             idx += 1;
-        }
+            if target_indices.is_empty() && query_indices.is_empty() {
+                Ok(())
+            } else {
+                Ok(())
+            }
+        })?;
 
         self.target_num_bases = sum_target_len;
         self.query_num_bases = sum_query_len;

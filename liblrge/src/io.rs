@@ -9,9 +9,12 @@ use bzip2::bufread::BzDecoder;
 use flate2::bufread::MultiGzDecoder;
 #[cfg(feature = "xz")]
 use liblzma::read::XzDecoder;
-use needletail::parse_fastx_reader;
+use needletail::{parse_fastx_reader, FastxReader};
 #[cfg(feature = "zstd")]
 use zstd::stream::read::Decoder as ZstdDecoder;
+
+#[cfg(feature = "alignment")]
+use noodles_util::alignment;
 
 /// The compression format of a file.
 #[derive(Debug, PartialEq, Copy, Clone, Default)]
@@ -36,9 +39,8 @@ fn detect_compression_format<R: Read + Seek>(reader: &mut R) -> io::Result<Compr
     reader.seek(SeekFrom::Start(0))?;
 
     let mut magic = [0; 5];
-    reader
-        .read_exact(&mut magic)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let n = reader.read(&mut magic)?;
+    let magic = &magic[..n];
 
     let format = match magic {
         #[cfg(feature = "gzip")]
@@ -58,44 +60,122 @@ fn detect_compression_format<R: Read + Seek>(reader: &mut R) -> io::Result<Compr
     Ok(format)
 }
 
-/// Opens a file and returns a reader. Supports gzip and zstd compression if the corresponding
-/// feature is enabled. If the file is not compressed, a regular file reader is returned. If the
-/// file is compressed with an unsupported format, an error is returned.
-pub(crate) fn open_file<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read + Send>> {
-    let mut buf = File::open(&path).map(BufReader::new)?;
-    let compression_format = detect_compression_format(&mut buf)?;
-
-    let reader: Box<dyn Read + Send> = match compression_format {
-        #[cfg(feature = "gzip")]
-        CompressionFormat::Gzip => Box::new(MultiGzDecoder::new(buf)),
-
-        #[cfg(feature = "zstd")]
-        CompressionFormat::Zstd => Box::new(ZstdDecoder::new(buf)?),
-
-        #[cfg(feature = "bzip2")]
-        CompressionFormat::Bzip2 => Box::new(BzDecoder::new(buf)),
-
-        #[cfg(feature = "xz")]
-        CompressionFormat::Xz => Box::new(XzDecoder::new(buf)),
-
-        CompressionFormat::None => Box::new(buf),
-    };
-
-    Ok(reader)
+pub(crate) enum SeqReader {
+    Fastx(Box<dyn FastxReader>),
+    #[cfg(feature = "alignment")]
+    Alignment(alignment::io::Reader<Box<dyn Read + Send>>),
 }
 
-pub(crate) fn count_fastq_records<R: Read + Send>(reader: R) -> io::Result<usize> {
-    let mut count = 0;
+impl SeqReader {
+    pub fn new<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let mut file = File::open(&path).map(BufReader::new)?;
+        let compression_format = detect_compression_format(&mut file)?;
 
-    let mut fastx_reader =
-        parse_fastx_reader(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let mut magic = [0; 4];
+        let n = file.read(&mut magic)?;
+        let magic = &magic[..n];
+        file.seek(SeekFrom::Start(0))?;
 
-    while let Some(r) = fastx_reader.next() {
-        let _ = r.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        count += 1;
+        let is_alignment = magic.starts_with(b"BAM\x01")
+            || magic.starts_with(b"CRAM")
+            || magic.starts_with(b"@HD")
+            || magic.starts_with(b"@SQ")
+            || magic.starts_with(b"@RG");
+
+        let reader: Box<dyn Read + Send> = match compression_format {
+            #[cfg(feature = "gzip")]
+            CompressionFormat::Gzip => Box::new(MultiGzDecoder::new(file)),
+            #[cfg(feature = "zstd")]
+            CompressionFormat::Zstd => Box::new(ZstdDecoder::new(file)?),
+            #[cfg(feature = "bzip2")]
+            CompressionFormat::Bzip2 => Box::new(BzDecoder::new(file)),
+            #[cfg(feature = "xz")]
+            CompressionFormat::Xz => Box::new(XzDecoder::new(file)),
+            CompressionFormat::None => Box::new(file),
+        };
+
+        #[cfg(feature = "alignment")]
+        if is_alignment {
+            let aln_reader = alignment::io::Reader::new(reader)?;
+            return Ok(Self::Alignment(aln_reader));
+        }
+
+        if is_alignment && cfg!(not(feature = "alignment")) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Alignment format detected but 'alignment' feature is disabled",
+            ));
+        }
+
+        let fastx_reader =
+            parse_fastx_reader(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        Ok(Self::Fastx(fastx_reader))
     }
+}
 
+pub(crate) fn count_records<P: AsRef<Path>>(path: P) -> io::Result<usize> {
+    let mut reader = SeqReader::new(path)?;
+    let mut count = 0;
+    match &mut reader {
+        SeqReader::Fastx(r) => {
+            while let Some(res) = r.next() {
+                res.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                count += 1;
+            }
+        }
+        #[cfg(feature = "alignment")]
+        SeqReader::Alignment(r) => {
+            let header = r.read_header()?;
+            for res in r.records(&header) {
+                res?;
+                count += 1;
+            }
+        }
+    }
+    if count == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Is the file empty?",
+        ));
+    }
     Ok(count)
+}
+
+pub(crate) fn iter_records<P: AsRef<Path>>(
+    path: P,
+    mut callback: impl FnMut(&[u8], &[u8]) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut reader = SeqReader::new(path)?;
+    match &mut reader {
+        SeqReader::Fastx(r) => {
+            while let Some(res) = r.next() {
+                let rec = res.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                callback(rec.read_id(), &rec.seq())?;
+            }
+        }
+        #[cfg(feature = "alignment")]
+        SeqReader::Alignment(r) => {
+            let header = r.read_header()?;
+            let mut seq_buf = Vec::new();
+            for res in r.records(&header) {
+                let record = res?;
+                if !record.flags().unwrap_or_default().is_unmapped() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Mapped records are not supported. Only unaligned BAM/CRAM/SAM is allowed.",
+                    ));
+                }
+                let name = record.name().map(|n| n.as_ref()).unwrap_or_default();
+                let sequence = record.sequence();
+                seq_buf.clear();
+                for base in sequence.as_ref().iter() {
+                    seq_buf.push(u8::from(base));
+                }
+                callback(name, &seq_buf)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A message that can be sent in a channel.
@@ -123,6 +203,7 @@ impl FastqRecordExt for needletail::parser::SequenceRecord<'_> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use tempfile;
 
     #[test]
     fn test_detect_gzip_format() {
@@ -217,30 +298,6 @@ mod tests {
     }
 
     #[test]
-    fn test_count_fastq_records() {
-        let data = b"@SEQ_ID\nGATTA\n+\n!!!!!\n@SEQ_ID2\nGATTA\n+\n!!!!!\n";
-        let reader = Cursor::new(data);
-        let count = count_fastq_records(reader).unwrap();
-        assert_eq!(count, 2);
-    }
-
-    #[test]
-    fn test_count_fastq_records_with_empty_file() {
-        let data = b"";
-        let reader = Cursor::new(data);
-        let err = count_fastq_records(reader).unwrap_err();
-        assert!(err.to_string().contains("Is the file empty?"));
-    }
-
-    #[test]
-    fn test_count_fastq_records_with_invalid_data() {
-        let data = b"@SEQ_ID\nGATTA\n+\n!!!!\n@SEQ_ID2\nGATTA\n+\n!!!!!";
-        let reader = Cursor::new(data);
-        let err = count_fastq_records(reader).unwrap_err();
-        assert!(err.to_string().contains("but quality length is"));
-    }
-
-    #[test]
     fn test_read_id_no_comment() {
         let data = b"@SEQ_ID\nGATTA\n+\n!!!!!\n";
         let reader = Cursor::new(data);
@@ -283,5 +340,48 @@ mod tests {
         let mut fastx_reader = parse_fastx_reader(reader).unwrap();
         let record = fastx_reader.next().unwrap().unwrap();
         assert_eq!(record.read_id(), b"SEQ_ID");
+    }
+
+    #[test]
+    #[cfg(feature = "alignment")]
+    fn test_detect_alignment_format() {
+        use std::io::Write;
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            "@HD\tVN:1.6\tSO:unsorted\nREAD1\t4\t*\t0\t0\t*\t*\t0\t0\tGATTA\t!!!!!\n"
+        )
+        .unwrap();
+
+        let mut names = Vec::new();
+        let mut seqs = Vec::new();
+        iter_records(temp_file.path(), |id, seq| {
+            names.push(id.to_vec());
+            seqs.push(seq.to_vec());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(names, vec![b"READ1"]);
+        assert_eq!(seqs, vec![b"GATTA"]);
+    }
+
+    #[test]
+    #[cfg(feature = "alignment")]
+    fn test_detect_mapped_alignment_errors() {
+        use std::io::Write;
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            temp_file,
+            "@HD\tVN:1.6\tSO:unsorted\n@SQ\tSN:chr1\tLN:1000\nREAD1\t0\tchr1\t1\t0\t5M\t*\t0\t0\tGATTA\t!!!!!\n"
+        )
+        .unwrap();
+
+        let result = iter_records(temp_file.path(), |_, _| Ok(()));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Mapped records are not supported"));
     }
 }

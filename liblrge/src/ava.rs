@@ -35,6 +35,7 @@
 //! while the overlap file will be named `overlaps.paf`.
 //!
 //! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
+use std::io::Write;
 mod builder;
 
 use std::collections::{HashMap, HashSet};
@@ -47,7 +48,7 @@ use std::sync::{Arc, Mutex};
 
 use crossbeam_channel as channel;
 use log::{debug, info, trace, warn};
-use needletail::{parse_fastx_file, parse_fastx_reader};
+use needletail::parse_fastx_file;
 use rayon::prelude::*;
 
 pub use self::builder::Builder;
@@ -105,16 +106,13 @@ impl AvaStrategy {
 
     /// Subsample the reads in the input file to `num_reads`.
     fn subsample_reads(&mut self) -> crate::Result<(PathBuf, usize)> {
-        debug!("Counting records in FASTQ file...");
-        let n_fq_reads = {
-            let mut reader = io::open_file(&self.input)?;
-            io::count_fastq_records(&mut reader)?
-        };
-        debug!("Found {} reads in FASTQ file", n_fq_reads);
+        debug!("Counting records in input file...");
+        let n_fq_reads = io::count_records(&self.input)?;
+        debug!("Found {} reads in input file", n_fq_reads);
 
         if n_fq_reads > u32::MAX as usize {
             let msg = format!(
-                "Number of reads in FASTQ file ({}) exceeds maximum allowed value ({})",
+                "Number of reads in input file ({}) exceeds maximum allowed value ({})",
                 n_fq_reads,
                 u32::MAX
             );
@@ -123,7 +121,7 @@ impl AvaStrategy {
 
         if n_fq_reads < self.num_reads {
             warn!(
-                "Number of reads in FASTQ file ({}) is less than the number requested ({})",
+                "Number of reads in input file ({}) is less than the number requested ({})",
                 n_fq_reads, self.num_reads
             );
             self.num_reads = n_fq_reads;
@@ -135,33 +133,28 @@ impl AvaStrategy {
                 .cloned()
                 .collect();
 
-        let out_file = self.tmpdir.join("reads.fq");
-        let reader = io::open_file(&self.input)?;
-        let mut fastx_reader = parse_fastx_reader(reader).map_err(|e| {
-            LrgeError::FastqParseError(format!("Error parsing input FASTQ file: {e}"))
-        })?;
+        let out_file = self.tmpdir.join("reads.fa");
 
         debug!("Writing subsampled reads to temporary files...");
         let mut writer = File::create(&out_file).map(BufWriter::new)?;
         let mut sum_len = 0;
         let mut idx: u32 = 0;
-        while let Some(r) = fastx_reader.next() {
-            // we can unwrap here because we know the file is valid from when we counted the records
-            let record = r.unwrap();
-
+        io::iter_records(&self.input, |id, seq| {
             if indices.remove(&idx) {
-                record
-                    .write(&mut writer, None)
-                    .map_err(|e| LrgeError::IoError(std::io::Error::other(e)))?;
-                sum_len += record.num_bases();
+                sum_len += seq.len();
+                writer.write_all(b">")?;
+                writer.write_all(id)?;
+                writer.write_all(b"\n")?;
+                writer.write_all(seq)?;
+                writer.write_all(b"\n")?;
             }
-
-            if indices.is_empty() {
-                break;
-            }
-
             idx += 1;
-        }
+            if indices.is_empty() {
+                Ok(())
+            } else {
+                Ok(())
+            }
+        })?;
 
         self.num_bases = sum_len;
 
