@@ -1,6 +1,6 @@
 [package]
 name = "lrge"
-version = "0.2.1"
+version = "0.2.2"
 categories = ["science", "command-line-utilities"]
 description.workspace = true
 authors.workspace = true
@@ -19,7 +19,7 @@ anyhow = "1.0.95"
 clap = { version = "4.5.23", features = ["derive"] }
 env_logger = "0.11.6"
 tempfile = "3.14.0"
-liblrge = { path = "../liblrge", version = "0.2.1" }
+liblrge = { path = "../liblrge", version = "0.2.2" }
 
 [dev-dependencies]
 assert_cmd = "2.0.16"
