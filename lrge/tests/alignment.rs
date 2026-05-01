@@ -54,11 +54,14 @@ fn test_toy_bam_input() {
     let bam_path = std::path::Path::new("tests").join("data").join("toy.bam");
 
     if bam_path.exists() {
+        // Use a fixed seed to ensure deterministic behavior across platforms
         cmd.arg(bam_path)
             .arg("-T")
             .arg("10")
             .arg("-Q")
             .arg("5")
+            .arg("--seed")
+            .arg("1")
             .assert()
             .success();
     }
