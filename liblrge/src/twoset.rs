@@ -182,11 +182,7 @@ impl TwoSetStrategy {
             }
 
             idx += 1;
-            if target_indices.is_empty() && query_indices.is_empty() {
-                Ok(())
-            } else {
-                Ok(())
-            }
+            Ok(())
         })?;
 
         self.target_num_bases = sum_target_len;

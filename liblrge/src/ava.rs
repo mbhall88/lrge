@@ -149,11 +149,7 @@ impl AvaStrategy {
                 writer.write_all(b"\n")?;
             }
             idx += 1;
-            if indices.is_empty() {
-                Ok(())
-            } else {
-                Ok(())
-            }
+            Ok(())
         })?;
 
         self.num_bases = sum_len;

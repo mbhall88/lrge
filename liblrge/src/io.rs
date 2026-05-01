@@ -107,8 +107,8 @@ impl SeqReader {
             ));
         }
 
-        let fastx_reader =
-            parse_fastx_reader(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let fastx_reader = parse_fastx_reader(reader)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         Ok(Self::Fastx(fastx_reader))
     }
 }
@@ -169,7 +169,7 @@ pub(crate) fn iter_records<P: AsRef<Path>>(
                 let sequence = record.sequence();
                 seq_buf.clear();
                 for base in sequence.as_ref().iter() {
-                    seq_buf.push(u8::from(base));
+                    seq_buf.push(base);
                 }
                 callback(name, &seq_buf)?;
             }
@@ -203,7 +203,6 @@ impl FastqRecordExt for needletail::parser::SequenceRecord<'_> {
 mod tests {
     use super::*;
     use std::io::Cursor;
-    use tempfile;
 
     #[test]
     fn test_detect_gzip_format() {
