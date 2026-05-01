@@ -22,7 +22,7 @@
 //! use liblrge::{Estimate, TwoSetStrategy};
 //! use liblrge::twoset::{Builder, DEFAULT_TARGET_NUM_READS, DEFAULT_QUERY_NUM_READS};
 //!
-//! let input = "path/to/reads.fastq";
+//! let input = "path/to/reads.fastq"; // or .fasta, .bam, .cram, .sam
 //! let mut strategy = Builder::new()
 //!    .target_num_reads(DEFAULT_TARGET_NUM_READS)
 //!    .query_num_reads(DEFAULT_QUERY_NUM_READS)
@@ -45,7 +45,7 @@
 //! use liblrge::{Estimate, AvaStrategy};
 //! use liblrge::ava::{Builder, DEFAULT_AVA_NUM_READS};
 //!
-//! let input = "path/to/reads.fastq";
+//! let input = "path/to/reads.fastq"; // or .fasta, .bam, .cram, .sam
 //! let mut strategy = Builder::new()
 //!    .num_reads(DEFAULT_AVA_NUM_READS)
 //!   .threads(4)
@@ -58,13 +58,13 @@
 //!
 //! ## Features
 //!
-//! This library includes optional support for compressed file formats, controlled by feature flags.
-//! By default, the `compression` feature is enabled, which activates support for all included
-//! compression formats.
+//! This library includes optional support for compressed file formats and alignment formats, controlled by feature flags.
+//! By default, the `compression` and `alignment` features are enabled.
 //!
 //! ### Available Features
 //!
 //! - **compression** (default): Enables all available compression formats (`gzip`, `zstd`, `bzip2`, `xz`).
+//! - **alignment** (default): Enables support for unaligned BAM, CRAM, and SAM formats using the [`noodles`][noodles] crate.
 //! - **gzip**: Enables support for gzip-compressed files (`.gz`) using the [`flate2`][flate2] crate.
 //! - **zstd**: Enables support for zstd-compressed files (`.zst`) using the [`zstd`][zstd] crate.
 //! - **bzip2**: Enables support for bzip2-compressed files (`.bz2`) using the [`bzip2`][bzip2] crate.
@@ -72,34 +72,34 @@
 //!
 //! ### Enabling and Disabling Features
 //!
-//! By default, all compression features are enabled. However, you can selectively enable or disable them
-//! in your `Cargo.toml` to reduce dependencies or target specific compression formats:
+//! By default, all features are enabled. However, you can selectively enable or disable them
+//! in your `Cargo.toml` to reduce dependencies or target specific formats:
 //!
-//! To **disable all compression features**:
-//!
-//! ```toml
-//! liblrge = { version = "0.1.1", default-features = false }
-//! ```
-//!
-//! To enable only specific compression formats, list the desired features in `Cargo.toml`:
+//! To **disable all optional features**:
 //!
 //! ```toml
-//! liblrge = { version = "0.1.1", default-features = false, features = ["gzip", "zstd"] }
+//! liblrge = { version = "0.2.2", default-features = false }
 //! ```
 //!
-//! In this example, only `gzip` (`flate2`) and `zstd` are enabled, so `liblrge` will support `.gz`
-//! and `.zst` files.
+//! To enable only specific features, list them in `Cargo.toml`:
 //!
-//! ## Compression Detection
+//! ```toml
+//! liblrge = { version = "0.2.2", default-features = false, features = ["gzip", "alignment"] }
+//! ```
+//!
+//! ## Format Detection
 //!
 //! The library uses [**magic bytes**][magic] at the start of the file to detect its compression
-//! format before deciding how to read it. Supported formats include gzip, zstd, bzip2, and xz, with
-//! automatic decompression if the [appropriate feature](#features) is enabled.
+//! format and content type before deciding how to read it. Supported formats include:
+//! - **FASTX**: FASTA and FASTQ (via `needletail`).
+//! - **Alignment**: BAM, CRAM, and SAM (via `noodles`). Alignment files must be **unaligned**.
+//! - **Compression**: gzip, zstd, bzip2, and xz (automatic decompression if the [appropriate feature](#features) is enabled).
 //!
 //! [flate2]: https://crates.io/crates/flate2
 //! [zstd]: https://crates.io/crates/zstd
 //! [xz]: https://crates.io/liblzma
 //! [bzip2]: https://crates.io/crates/bzip2
+//! [noodles]: https://crates.io/crates/noodles
 //! [magic]: https://en.wikipedia.org/wiki/Magic_number_(programming)#In_files
 //!
 //! ## Disabling logging

@@ -1,0 +1,17 @@
+{
+  "packages": {
+    "lrge": {
+      "release-type": "rust",
+      "package-name": "lrge"
+    },
+    "liblrge": {
+      "release-type": "rust",
+      "package-name": "liblrge"
+    }
+  },
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-v-in-tag": false,
+  "plugins": [
+    "cargo-workspace"
+  ]
+}

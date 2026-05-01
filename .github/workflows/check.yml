@@ -113,7 +113,7 @@ jobs:
     # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability
     strategy:
       matrix:
-        msrv: ["1.74.1"] # obtained from cargo-msrv 22/11/2024
+        msrv: ["1.88.0"] # required by noodles 0.109.0 and liblzma 0.4.5
     name: ubuntu / ${{ matrix.msrv }}
     steps:
       - uses: actions/checkout@v6

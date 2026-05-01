@@ -4,7 +4,9 @@ name: Release
 on:
   push:
     tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
       - "lrge-[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
 
 env:
   CICD_INTERMEDIATES_DIR: "_release-intermediates"
@@ -100,10 +102,13 @@ jobs:
             *-pc-windows-*) 7z -y a "${PKG_NAME}" "${PKG_BASENAME}"/* | tail -2 ;;
             *) tar czf "${PKG_NAME}" "${PKG_BASENAME}"/* ;;
           esac;
+          # Generate SHA-256 checksum
+          sha256sum "${PKG_NAME}" > "${PKG_NAME}.sha256"
           popd >/dev/null
           
           # Let subsequent steps know where to find the compressed package
           echo "PKG_PATH=${PKG_STAGING}/${PKG_NAME}" >> $GITHUB_OUTPUT
+          echo "SHA_PATH=${PKG_STAGING}/${PKG_NAME}.sha256" >> $GITHUB_OUTPUT
 
       - name: "Artifact upload: tarball"
         uses: actions/upload-artifact@master
@@ -115,7 +120,7 @@ jobs:
         id: is-release
         shell: bash
         run: |
-          unset IS_RELEASE ; if [[ $GITHUB_REF =~ ^refs/tags/lrge-[0-9].* ]]; then IS_RELEASE='true' ; fi
+          unset IS_RELEASE ; if [[ $GITHUB_REF =~ ^refs/tags/([0-9]|lrge-[0-9]).* ]]; then IS_RELEASE='true' ; fi
           echo "IS_RELEASE=${IS_RELEASE}" >> $GITHUB_OUTPUT
 
       - name: Publish archives and packages
@@ -124,5 +129,7 @@ jobs:
         with:
           files: |
             ${{ steps.package.outputs.PKG_PATH }}
+            ${{ steps.package.outputs.SHA_PATH }}
+            install/install.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
