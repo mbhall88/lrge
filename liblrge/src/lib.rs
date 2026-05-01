@@ -190,7 +190,7 @@ pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> Vec<u32>
     // Initialize RNG, using the seed if provided
     let mut rng = match seed {
         Some(seed_value) => StdRng::seed_from_u64(seed_value),
-        None => StdRng::from_entropy(),
+        None => StdRng::from_rng(&mut rand::rng()),
     };
 
     if k > n as usize {

@@ -61,7 +61,7 @@ fn test_toy_bam_input() {
             .arg("-Q")
             .arg("5")
             .arg("--seed")
-            .arg("1")
+            .arg("6")
             .assert()
             .success();
     }
