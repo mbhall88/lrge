@@ -1,0 +1,45 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "lrge-[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish liblrge
+        shell: bash
+        run: |
+          # Only publish if this is a tag for liblrge or a workspace-wide tag
+          # Since we are using cargo-workspace plugin, release-please might create individual tags 
+          # or a single tag. We check if the version in liblrge/Cargo.toml matches the tag.
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' liblrge/Cargo.toml | head -n1)
+          if [[ "$GITHUB_REF" == "refs/tags/$VERSION" ]] || [[ "$GITHUB_REF" == "refs/tags/liblrge-$VERSION" ]] || [[ "$GITHUB_REF" == "refs/tags/lrge-$VERSION" ]]; then
+            echo "Publishing liblrge v$VERSION"
+            cargo publish -p liblrge --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          else
+            echo "Tag does not match liblrge version, skipping publish."
+          fi
+
+      - name: Publish lrge
+        shell: bash
+        run: |
+          # Wait a few seconds for crates.io to index liblrge if it was just published
+          sleep 30
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' lrge/Cargo.toml | head -n1)
+          if [[ "$GITHUB_REF" == "refs/tags/$VERSION" ]] || [[ "$GITHUB_REF" == "refs/tags/lrge-$VERSION" ]]; then
+            echo "Publishing lrge v$VERSION"
+            cargo publish -p lrge --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          else
+            echo "Tag does not match lrge version, skipping publish."
+          fi
