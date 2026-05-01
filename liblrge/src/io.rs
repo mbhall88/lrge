@@ -71,18 +71,7 @@ impl SeqReader {
         let mut file = File::open(&path).map(BufReader::new)?;
         let compression_format = detect_compression_format(&mut file)?;
 
-        let mut magic = [0; 4];
-        let n = file.read(&mut magic)?;
-        let magic = &magic[..n];
-        file.seek(SeekFrom::Start(0))?;
-
-        let is_alignment = magic.starts_with(b"BAM\x01")
-            || magic.starts_with(b"CRAM")
-            || magic.starts_with(b"@HD")
-            || magic.starts_with(b"@SQ")
-            || magic.starts_with(b"@RG");
-
-        let reader: Box<dyn Read + Send> = match compression_format {
+        let decompressed_reader: Box<dyn Read + Send> = match compression_format {
             #[cfg(feature = "gzip")]
             CompressionFormat::Gzip => Box::new(MultiGzDecoder::new(file)),
             #[cfg(feature = "zstd")]
@@ -94,9 +83,25 @@ impl SeqReader {
             CompressionFormat::None => Box::new(file),
         };
 
+        // Sniff decompressed magic bytes
+        let mut reader = decompressed_reader;
+        let mut magic = [0; 4];
+        let n = reader.read(&mut magic)?;
+        let magic_slice = &magic[..n];
+
+        let is_alignment = magic_slice.starts_with(b"BAM\x01")
+            || magic_slice.starts_with(b"CRAM")
+            || magic_slice.starts_with(b"@HD")
+            || magic_slice.starts_with(b"@SQ")
+            || magic_slice.starts_with(b"@RG");
+
+        // Chain the sniffed bytes back to the reader
+        let full_reader: Box<dyn Read + Send> =
+            Box::new(io::Cursor::new(magic_slice.to_vec()).chain(reader));
+
         #[cfg(feature = "alignment")]
         if is_alignment {
-            let aln_reader = alignment::io::Reader::new(reader)?;
+            let aln_reader = alignment::io::Reader::new(full_reader)?;
             return Ok(Self::Alignment(aln_reader));
         }
 
@@ -107,7 +112,7 @@ impl SeqReader {
             ));
         }
 
-        let fastx_reader = parse_fastx_reader(reader)
+        let fastx_reader = parse_fastx_reader(full_reader)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         Ok(Self::Fastx(fastx_reader))
     }
