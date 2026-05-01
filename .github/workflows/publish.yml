@@ -26,10 +26,12 @@ jobs:
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' liblrge/Cargo.toml | head -n1)
           if [[ "$GITHUB_REF" == "refs/tags/$VERSION" ]] || [[ "$GITHUB_REF" == "refs/tags/liblrge-$VERSION" ]] || [[ "$GITHUB_REF" == "refs/tags/lrge-$VERSION" ]]; then
             echo "Publishing liblrge v$VERSION"
-            cargo publish -p liblrge --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+            cargo publish -p liblrge
           else
             echo "Tag does not match liblrge version, skipping publish."
           fi
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Publish lrge
         shell: bash
@@ -39,7 +41,9 @@ jobs:
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' lrge/Cargo.toml | head -n1)
           if [[ "$GITHUB_REF" == "refs/tags/$VERSION" ]] || [[ "$GITHUB_REF" == "refs/tags/lrge-$VERSION" ]]; then
             echo "Publishing lrge v$VERSION"
-            cargo publish -p lrge --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+            cargo publish -p lrge
           else
             echo "Tag does not match lrge version, skipping publish."
           fi
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

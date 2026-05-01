@@ -9,7 +9,7 @@ const MAX_OVERHANG_RATIO: &str = "0.2";
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// Input FASTQ file
+    /// Input FASTQ, FASTA, or unaligned BAM/CRAM/SAM file
     #[arg(name = "INPUT", value_parser = check_path_exists)]
     pub input: PathBuf,
 
