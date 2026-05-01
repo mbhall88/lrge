@@ -1,9 +1,0 @@
-name: genomescope
-channels:
-  - conda-forge
-  - bioconda
-dependencies:
-  - python=3
-  - kmc=3.2
-  - genomescope2=2.0
-  - ripgrep=14.0
