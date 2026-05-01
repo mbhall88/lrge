@@ -12,7 +12,7 @@ fn test_sam_input() {
     .unwrap();
 
     let mut cmd = Command::cargo_bin("lrge").unwrap();
-    // We expect failure because 2 reads won't generate a finite estimate,
+    // We expect failure because 2 reads won't generate a finite estimate, 
     // but it should NOT fail due to parsing.
     cmd.arg(temp_file.path())
         .arg("-T")
@@ -21,9 +21,7 @@ fn test_sam_input() {
         .arg("1")
         .assert()
         .failure()
-        .stderr(predicates::str::contains(
-            "No finite estimates were generated",
-        ));
+        .stderr(predicates::str::contains("No finite estimates were generated"));
 }
 
 #[test]
@@ -43,7 +41,21 @@ fn test_mapped_sam_fails() {
         .arg("1")
         .assert()
         .failure()
-        .stderr(predicates::str::contains(
-            "Mapped records are not supported",
-        ));
+        .stderr(predicates::str::contains("Mapped records are not supported"));
+}
+
+#[test]
+fn test_toy_bam_input() {
+    let mut cmd = Command::cargo_bin("lrge").unwrap();
+    let bam_path = std::path::Path::new("tests").join("data").join("toy.bam");
+
+    if bam_path.exists() {
+        cmd.arg(bam_path)
+            .arg("-T")
+            .arg("10")
+            .arg("-Q")
+            .arg("5")
+            .assert()
+            .success();
+    }
 }
