@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     name: stable / fmt
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install stable
@@ -47,7 +47,7 @@ jobs:
         # Get early warning of new lints which are regularly introduced in beta channels.
         toolchain: [stable, beta]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install ${{ matrix.toolchain }}
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     name: semver
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install stable
@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     name: nightly / doc
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install nightly
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / stable / features
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install stable
@@ -116,7 +116,7 @@ jobs:
         msrv: ["1.88.0"] # required by noodles 0.109.0 and liblzma 0.4.5
     name: ubuntu / ${{ matrix.msrv }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install ${{ matrix.msrv }}
