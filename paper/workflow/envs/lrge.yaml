@@ -1,0 +1,10 @@
+name: lrge
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - minimap2=2.28
+  - loguru
+  - pyfastx=2.1
+  - rasusa=2.1

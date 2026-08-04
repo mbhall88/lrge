@@ -1,0 +1,8 @@
+name: mash
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3
+  - mash=2.3
+  - ripgrep=14.0
