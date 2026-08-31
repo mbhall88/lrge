@@ -346,6 +346,8 @@ Arguments:
       --max-overhang-ratio <FLOAT>
           Maximum overhang size to alignment length ratio for internal overlap filtering
 
+          Only meaningful alongside -F/--filter-contained, which this option requires.
+
           [default: 0.2]
 
       --use-min-ref

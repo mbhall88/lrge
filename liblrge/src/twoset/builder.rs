@@ -2,9 +2,8 @@ use crate::Platform;
 use std::path::Path;
 use std::path::PathBuf;
 
-use super::{
-    TwoSetStrategy, DEFAULT_MAX_OVERHANG_RATIO, DEFAULT_QUERY_NUM_READS, DEFAULT_TARGET_NUM_READS,
-};
+use super::{TwoSetStrategy, DEFAULT_QUERY_NUM_READS, DEFAULT_TARGET_NUM_READS};
+use crate::DEFAULT_MAX_OVERHANG_RATIO;
 
 /// A builder for [`TwoSetStrategy`].
 pub struct Builder {

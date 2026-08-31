@@ -63,8 +63,6 @@ use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 10_000;
 pub const DEFAULT_QUERY_NUM_READS: usize = 5_000;
-/// The default maximum ratio of overhang to alignment length for internal match filtering.
-pub const DEFAULT_MAX_OVERHANG_RATIO: f32 = 0.2;
 
 /// A strategy that compares overlaps between two sets of reads.
 ///

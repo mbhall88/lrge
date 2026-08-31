@@ -133,6 +133,10 @@ pub(crate) mod io;
 pub(crate) mod minimap2;
 pub mod twoset;
 
+/// The default maximum ratio of overhang to alignment length above which an alignment is
+/// treated as an internal match. Shared by both strategies.
+pub const DEFAULT_MAX_OVERHANG_RATIO: f32 = 0.2;
+
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
