@@ -42,7 +42,6 @@
 //! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
 use std::io::Write;
 mod builder;
-use std::cmp;
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::fs::File;
@@ -64,6 +63,8 @@ use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 10_000;
 pub const DEFAULT_QUERY_NUM_READS: usize = 5_000;
+/// The default maximum ratio of overhang to alignment length for internal match filtering.
+pub const DEFAULT_MAX_OVERHANG_RATIO: f32 = 0.2;
 
 /// A strategy that compares overlaps between two sets of reads.
 ///
@@ -479,8 +480,6 @@ impl TwoSetStrategy {
                             let mut writer_lock = writer.lock().unwrap();
                             let mut ovlap_counter_lock = ovlap_counter.lock().unwrap();
                             let mut unique_overlaps: HashSet<Vec<u8>> = HashSet::new();
-                            let mut overhang: i32;
-                            let mut maplen: i32;
 
                             for mapping in &mappings {
                                 // write the PafRecord to the PAF file
@@ -490,31 +489,10 @@ impl TwoSetStrategy {
                                     continue;
                                 }
 
-                                if self.remove_internal {
-                                    if mapping.strand == '+' {
-                                        overhang =
-                                            cmp::min(mapping.query_start, mapping.target_start)
-                                                + cmp::min(
-                                                    mapping.query_len - mapping.query_end,
-                                                    mapping.target_len - mapping.target_end,
-                                                );
-                                    } else {
-                                        overhang = cmp::min(
-                                            mapping.query_start,
-                                            mapping.target_len - mapping.target_end,
-                                        ) + cmp::min(
-                                            mapping.query_len - mapping.query_end,
-                                            mapping.target_start,
-                                        );
-                                    }
-                                    maplen = cmp::max(
-                                        mapping.query_end - mapping.query_start,
-                                        mapping.target_end - mapping.target_start,
-                                    );
-                                    if overhang > ((maplen as f32) * self.max_overhang_ratio) as i32
-                                    {
-                                        continue;
-                                    }
+                                if self.remove_internal
+                                    && mapping.is_internal(self.max_overhang_ratio)
+                                {
+                                    continue;
                                 }
 
                                 *ovlap_counter_lock

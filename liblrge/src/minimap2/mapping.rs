@@ -54,8 +54,20 @@ pub(crate) struct PafRecord {
 }
 
 impl PafRecord {
-    /// Checks if the target or query read are internal to the other, within a specified overhang ratio.
-    /// This is used to filter out internal reads that are not useful for estimation.
+    /// Checks whether this mapping is an *internal match* - an alignment that sits in the
+    /// middle of both reads rather than running off at least one end of each.
+    ///
+    /// The overhang is the unaligned sequence flanking the alignment, using the miniasm
+    /// formula. A proper overlap (a dovetail, or one read contained in the other) leaves
+    /// almost nothing hanging off, so its overhang is near zero. An internal match - the
+    /// signature of two reads sharing a repeat rather than the same locus - leaves large
+    /// unaligned tails on both reads, so its overhang is typically several times the
+    /// length of the alignment itself.
+    ///
+    /// Returns `true` when the overhang exceeds `max_overhang_ratio` times the alignment
+    /// length, i.e. when the mapping should be discarded as an internal match. Note that
+    /// containment is *not* detected by this test: a contained read has a zero overhang,
+    /// exactly like a dovetail.
     pub(crate) fn is_internal(&self, max_overhang_ratio: f32) -> bool {
         let overhang = if self.strand == '+' {
             cmp::min(self.query_start, self.target_start)
@@ -73,7 +85,7 @@ impl PafRecord {
         );
 
         let overhang_ratio = overhang as f32 / maplen as f32;
-        overhang_ratio < max_overhang_ratio
+        overhang_ratio > max_overhang_ratio
     }
 }
 
@@ -419,75 +431,117 @@ mod tests {
         assert_eq!(result, expected);
     }
 
+    /// Build a `PafRecord` carrying only the fields `is_internal` reads.
+    ///
+    /// Coordinates are given as `(len, start, end)` for the query and the target.
+    fn overlap(
+        strand: char,
+        (query_len, query_start, query_end): (i32, i32, i32),
+        (target_len, target_start, target_end): (i32, i32, i32),
+    ) -> PafRecord {
+        PafRecord {
+            query_name: b"query".to_vec(),
+            query_len,
+            query_start,
+            query_end,
+            strand,
+            target_name: b"target".to_vec(),
+            target_len,
+            target_start,
+            target_end,
+            ..Default::default()
+        }
+    }
+
     #[test]
-    fn test_is_internal() {
-        let mapping = PafRecord {
-            query_name: b"SRR28370649.1".to_vec(),
-            query_len: 390,
-            query_start: 46,
-            query_end: 317,
-            strand: '+',
-            target_name: b"SRR28370649.7311".to_vec(),
-            target_len: 278,
-            target_start: 4,
-            target_end: 275,
-            match_len: 260,
-            block_len: 271,
-            mapq: 0,
-            tp: 'S',
-            cm: 77,
-            s1: 260,
-            dv: 0.0,
-            rl: 0,
-        };
+    fn is_internal_dovetail_is_not_internal() {
+        // the query's suffix aligns to the target's prefix - the canonical proper overlap.
+        // overhang = min(8000, 0) + min(0, 8000) = 0, maplen = 2000, ratio = 0.0
+        let mapping = overlap('+', (10_000, 8_000, 10_000), (10_000, 0, 2_000));
+
+        assert!(!mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn is_internal_dovetail_on_reverse_strand_is_not_internal() {
+        // both reads' suffixes align because the target is reverse-complemented.
+        // overhang = min(8000, 0) + min(0, 8000) = 0, maplen = 2000, ratio = 0.0
+        let mapping = overlap('-', (10_000, 8_000, 10_000), (10_000, 8_000, 10_000));
+
+        assert!(!mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn is_internal_internal_match_is_internal() {
+        // a short alignment sitting mid-read in both reads - the signature of two reads
+        // sharing a repeat. On SRR16767125 (X. oryzae) alignments of this shape have a
+        // median overhang ratio of 7.74 against reads averaging 10.3 kbp (see issue #31).
+        // overhang = min(4000, 4600) + min(5200, 4600) = 8600, maplen = 800, ratio = 10.75
+        let mapping = overlap('+', (10_000, 4_000, 4_800), (10_000, 4_600, 5_400));
+
         assert!(mapping.is_internal(0.2));
     }
 
     #[test]
-    fn test_is_internal2() {
-        let mapping = PafRecord {
-            query_name: b"SRR28370649.1".to_vec(),
-            query_len: 298,
-            query_start: 1,
-            query_end: 297,
-            strand: '+',
-            target_name: b"SRR28370649.7311".to_vec(),
-            target_len: 398,
-            target_start: 54,
-            target_end: 350,
-            match_len: 276,
-            block_len: 296,
-            mapq: 0,
-            tp: 'S',
-            cm: 77,
-            s1: 260,
-            dv: 0.0,
-            rl: 0,
-        };
+    fn is_internal_internal_match_on_reverse_strand_is_internal() {
+        // overhang = min(4000, 4600) + min(5200, 4600) = 8600, maplen = 800, ratio = 10.75
+        let mapping = overlap('-', (10_000, 4_000, 4_800), (10_000, 4_600, 5_400));
+
         assert!(mapping.is_internal(0.2));
     }
 
     #[test]
-    fn test_is_internal3() {
-        let mapping = PafRecord {
-            query_name: b"SRR28370649.1".to_vec(),
-            query_len: 390,
-            query_start: 0,
-            query_end: 355,
-            strand: '+',
-            target_name: b"SRR28370649.7311".to_vec(),
-            target_len: 418,
-            target_start: 39,
-            target_end: 394,
-            match_len: 335,
-            block_len: 355,
-            mapq: 0,
-            tp: 'S',
-            cm: 77,
-            s1: 260,
-            dv: 0.0,
-            rl: 0,
-        };
-        assert!(!mapping.is_internal(0.05));
+    fn is_internal_containment_is_not_internal() {
+        // the query lies wholly inside the target. Containment has a zero overhang, exactly
+        // like a dovetail, so this predicate cannot distinguish the two - despite the
+        // `--filter-contained` flag name, contained reads are not what it removes.
+        // overhang = min(0, 4000) + min(0, 4000) = 0, maplen = 2000, ratio = 0.0
+        let mapping = overlap('+', (2_000, 0, 2_000), (10_000, 4_000, 6_000));
+
+        assert!(!mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn is_internal_just_below_the_threshold_is_not_internal() {
+        // overhang = 199 + 0 = 199, maplen = 1000, ratio = 0.199
+        let mapping = overlap('+', (1_300, 199, 1_199), (1_500, 500, 1_500));
+
+        assert!(!mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn is_internal_at_the_threshold_is_not_internal() {
+        // the comparison is strict, so a ratio landing exactly on the threshold is kept.
+        // overhang = 200 + 0 = 200, maplen = 1000, ratio = 0.2
+        let mapping = overlap('+', (1_301, 200, 1_200), (1_500, 500, 1_500));
+
+        assert!(!mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn is_internal_just_above_the_threshold_is_internal() {
+        // overhang = 201 + 0 = 201, maplen = 1000, ratio = 0.201
+        let mapping = overlap('+', (1_302, 201, 1_201), (1_500, 500, 1_500));
+
+        assert!(mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn is_internal_threshold_is_honoured() {
+        // overhang = 24 + 0 = 24, maplen = 355, ratio = 0.0676 - internal under a strict
+        // threshold, a proper overlap under the default one.
+        let mapping = overlap('+', (390, 0, 355), (418, 39, 394));
+
+        assert!(mapping.is_internal(0.05));
+        assert!(!mapping.is_internal(0.2));
+    }
+
+    #[test]
+    fn is_internal_near_dovetail_with_small_overhangs_is_not_internal() {
+        // a real overlap with a few bases of unaligned sequence either side.
+        // overhang = min(46, 4) + min(73, 3) = 7, maplen = 271, ratio = 0.0258
+        let mapping = overlap('+', (390, 46, 317), (278, 4, 275));
+
+        assert!(!mapping.is_internal(0.2));
     }
 }

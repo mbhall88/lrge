@@ -2,7 +2,9 @@ use crate::Platform;
 use std::path::Path;
 use std::path::PathBuf;
 
-use super::{TwoSetStrategy, DEFAULT_QUERY_NUM_READS, DEFAULT_TARGET_NUM_READS};
+use super::{
+    TwoSetStrategy, DEFAULT_MAX_OVERHANG_RATIO, DEFAULT_QUERY_NUM_READS, DEFAULT_TARGET_NUM_READS,
+};
 
 /// A builder for [`TwoSetStrategy`].
 pub struct Builder {
@@ -28,7 +30,7 @@ impl Default for Builder {
             query_num_reads: DEFAULT_QUERY_NUM_READS,
             query_num_bases: 0,
             remove_internal: false,
-            max_overhang_ratio: 0.2,
+            max_overhang_ratio: DEFAULT_MAX_OVERHANG_RATIO,
             use_min_ref: false,
             tmpdir,
             threads: 1,
@@ -86,12 +88,14 @@ impl Builder {
         self
     }
 
-    /// Set option for removing the overlaps representing internal matches
+    /// Set option for removing the overlaps representing internal matches, and the maximum
+    /// ratio of overhang to alignment length above which a mapping counts as one.
+    ///
+    /// The ratio is stored whether or not the filter is enabled, so it survives being set
+    /// before the filter is turned on.
     pub fn remove_internal(mut self, filter_contained: bool, ratio: f32) -> Self {
         self.remove_internal = filter_contained;
-        if filter_contained {
-            self.max_overhang_ratio = ratio;
-        }
+        self.max_overhang_ratio = ratio;
         self
     }
 
@@ -181,5 +185,38 @@ impl Builder {
             seed: self.seed,
             platform: self.platform,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_internal_keeps_the_ratio_when_the_filter_is_off() {
+        // the ratio is an independent setting - storing it only when the filter is enabled
+        // silently discards a caller's choice
+        let strategy = Builder::new()
+            .remove_internal(false, 0.05)
+            .build("reads.fq");
+
+        assert!(!strategy.remove_internal);
+        assert_eq!(strategy.max_overhang_ratio, 0.05);
+    }
+
+    #[test]
+    fn remove_internal_keeps_the_ratio_when_the_filter_is_on() {
+        let strategy = Builder::new().remove_internal(true, 0.05).build("reads.fq");
+
+        assert!(strategy.remove_internal);
+        assert_eq!(strategy.max_overhang_ratio, 0.05);
+    }
+
+    #[test]
+    fn remove_internal_defaults_to_off_with_the_default_ratio() {
+        let strategy = Builder::new().build("reads.fq");
+
+        assert!(!strategy.remove_internal);
+        assert_eq!(strategy.max_overhang_ratio, DEFAULT_MAX_OVERHANG_RATIO);
     }
 }
