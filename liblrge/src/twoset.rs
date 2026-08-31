@@ -149,10 +149,13 @@ impl TwoSetStrategy {
         let query_file = self.tmpdir.join("query.fa");
 
         debug!("Writing target and query reads to temporary files...");
-        let lengths = selector.write_selected(&[
-            (target_file.as_path(), self.target_num_reads),
-            (query_file.as_path(), self.query_num_reads),
-        ])?;
+        let lengths = selector.write_selected(
+            &[
+                (target_file.as_path(), self.target_num_reads),
+                (query_file.as_path(), self.query_num_reads),
+            ],
+            None,
+        )?;
         let sum_target_len = lengths[0];
         let sum_query_len = lengths[1];
 
