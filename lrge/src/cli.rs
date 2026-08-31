@@ -70,7 +70,7 @@ pub struct Args {
     pub upper_q: f32,
 
     /// Maximum overhang size to alignment length ratio for internal overlap filtering
-    #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, hide_short_help = true)]
+    #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, requires = "filter_contained", hide_short_help = true)]
     pub max_overhang_ratio: f32,
 
     /// Use the smaller Q/T dataset as minimap2 reference (for two-set strategy)
@@ -290,5 +290,34 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("error: the argument '--quiet...' cannot be used with"));
+    }
+
+    #[test]
+    fn cli_max_overhang_ratio_without_filter_contained_is_an_error() {
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "--max-overhang-ratio", "0.05"]);
+
+        let err = opts.unwrap_err().to_string();
+        assert!(
+            err.contains("--filter-contained"),
+            "error should name the flag that is missing, got: {err}"
+        );
+    }
+
+    #[test]
+    fn cli_max_overhang_ratio_with_filter_contained_is_accepted() {
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "-F", "--max-overhang-ratio", "0.05"])
+            .unwrap();
+
+        assert!(opts.filter_contained);
+        assert_eq!(opts.max_overhang_ratio, 0.05);
+    }
+
+    #[test]
+    fn cli_max_overhang_ratio_default_does_not_require_filter_contained() {
+        // the default value must not trip the requirement - a plain run has to keep working
+        let opts = Args::try_parse_from([BIN, "Cargo.toml"]).unwrap();
+
+        assert!(!opts.filter_contained);
+        assert_eq!(opts.max_overhang_ratio, MAX_OVERHANG_RATIO.parse().unwrap());
     }
 }

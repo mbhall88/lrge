@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{AvaStrategy, DEFAULT_AVA_NUM_READS};
+use super::{AvaStrategy, DEFAULT_AVA_NUM_READS, DEFAULT_MAX_OVERHANG_RATIO};
 use crate::Platform;
 
 /// A builder for [`AvaStrategy`].
@@ -22,7 +22,7 @@ impl Default for Builder {
             num_reads: DEFAULT_AVA_NUM_READS,
             num_bases: 0,
             remove_internal: false,
-            max_overhang_ratio: 0.2,
+            max_overhang_ratio: DEFAULT_MAX_OVERHANG_RATIO,
             tmpdir,
             threads: 1,
             seed: None,
@@ -59,12 +59,14 @@ impl Builder {
         self
     }
 
-    /// Set option for removing the overlaps representing internal matches
+    /// Set option for removing the overlaps representing internal matches, and the maximum
+    /// ratio of overhang to alignment length above which a mapping counts as one.
+    ///
+    /// The ratio is stored whether or not the filter is enabled, so it survives being set
+    /// before the filter is turned on.
     pub fn remove_internal(mut self, do_filt: bool, ratio: f32) -> Self {
         self.remove_internal = do_filt;
-        if do_filt {
-            self.max_overhang_ratio = ratio;
-        }
+        self.max_overhang_ratio = ratio;
         self
     }
 
@@ -149,5 +151,38 @@ impl Builder {
             seed: self.seed,
             platform: self.platform,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_internal_keeps_the_ratio_when_the_filter_is_off() {
+        // the ratio is an independent setting - storing it only when the filter is enabled
+        // silently discards a caller's choice
+        let strategy = Builder::new()
+            .remove_internal(false, 0.05)
+            .build("reads.fq");
+
+        assert!(!strategy.remove_internal);
+        assert_eq!(strategy.max_overhang_ratio, 0.05);
+    }
+
+    #[test]
+    fn remove_internal_keeps_the_ratio_when_the_filter_is_on() {
+        let strategy = Builder::new().remove_internal(true, 0.05).build("reads.fq");
+
+        assert!(strategy.remove_internal);
+        assert_eq!(strategy.max_overhang_ratio, 0.05);
+    }
+
+    #[test]
+    fn remove_internal_defaults_to_off_with_the_default_ratio() {
+        let strategy = Builder::new().build("reads.fq");
+
+        assert!(!strategy.remove_internal);
+        assert_eq!(strategy.max_overhang_ratio, DEFAULT_MAX_OVERHANG_RATIO);
     }
 }
