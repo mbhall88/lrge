@@ -40,7 +40,6 @@
 //! `overlaps.paf`.
 //!
 //! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
-use std::io::Write;
 mod builder;
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
@@ -59,7 +58,10 @@ pub use self::builder::Builder;
 use crate::estimate::per_read_estimate;
 use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
-use crate::{error::LrgeError, io, unique_random_set, Estimate, Platform};
+use crate::{error::LrgeError, io, read_selection::ReadSelector, Estimate, Platform};
+
+#[cfg(test)]
+pub(crate) use crate::read_selection::split_into_hashsets;
 
 pub const DEFAULT_TARGET_NUM_READS: usize = 10_000;
 pub const DEFAULT_QUERY_NUM_READS: usize = 5_000;
@@ -120,18 +122,13 @@ impl TwoSetStrategy {
 
     fn split_fastq(&mut self) -> crate::Result<(PathBuf, PathBuf, f32)> {
         debug!("Counting records in input file...");
-        let n_fq_reads = io::count_records(&self.input)?;
+        let selector = ReadSelector::new(&self.input, self.seed)?;
+        let n_fq_reads = selector.num_records();
         debug!("Found {} reads in input file", n_fq_reads);
 
-        if n_fq_reads > u32::MAX as usize {
-            let msg = format!(
-                "Number of reads in input file ({n_fq_reads}) exceeds maximum allowed value ({})",
-                u32::MAX
-            );
-            return Err(LrgeError::TooManyReadsError(msg));
-        }
+        selector.ensure_supported_record_count()?;
 
-        let mut n_req_reads = self.target_num_reads + self.query_num_reads;
+        let n_req_reads = self.target_num_reads + self.query_num_reads;
 
         if n_fq_reads <= self.query_num_reads {
             let msg = format!(
@@ -145,44 +142,19 @@ impl TwoSetStrategy {
                 n_fq_reads, n_req_reads
             );
             self.target_num_reads = n_fq_reads - self.query_num_reads;
-            n_req_reads = n_fq_reads;
             warn!("Using {} target reads", self.target_num_reads);
         }
-
-        let indices = unique_random_set(n_req_reads, n_fq_reads as u32, self.seed);
-        let (mut target_indices, mut query_indices) =
-            split_into_hashsets(indices, self.target_num_reads);
 
         let target_file = self.tmpdir.join("target.fa");
         let query_file = self.tmpdir.join("query.fa");
 
         debug!("Writing target and query reads to temporary files...");
-        let mut target_writer = File::create(&target_file).map(BufWriter::new)?;
-        let mut query_writer = File::create(&query_file).map(BufWriter::new)?;
-        let mut sum_target_len = 0;
-        let mut sum_query_len: usize = 0;
-        let mut idx: u32 = 0;
-
-        io::iter_records(&self.input, |id, seq| {
-            if target_indices.remove(&idx) {
-                target_writer.write_all(b">")?;
-                target_writer.write_all(id)?;
-                target_writer.write_all(b"\n")?;
-                target_writer.write_all(seq)?;
-                target_writer.write_all(b"\n")?;
-                sum_target_len += seq.len();
-            } else if query_indices.remove(&idx) {
-                query_writer.write_all(b">")?;
-                query_writer.write_all(id)?;
-                query_writer.write_all(b"\n")?;
-                query_writer.write_all(seq)?;
-                query_writer.write_all(b"\n")?;
-                sum_query_len += seq.len();
-            }
-
-            idx += 1;
-            Ok(())
-        })?;
+        let lengths = selector.write_selected(&[
+            (target_file.as_path(), self.target_num_reads),
+            (query_file.as_path(), self.query_num_reads),
+        ])?;
+        let sum_target_len = lengths[0];
+        let sum_query_len = lengths[1];
 
         self.target_num_bases = sum_target_len;
         self.query_num_bases = sum_query_len;
@@ -579,52 +551,6 @@ impl Estimate for TwoSetStrategy {
             self.align_reads(aligner, query_file, avg_target_len)
         }
     }
-}
-
-/// Splits a `Vec` into two separate sets with potentially different sizes.
-///
-/// This function consumes the original `Vec` and divides its elements into
-/// two new sets, `set1` and `set2`. The size of `set1` is specified by `size_first`,
-/// while `set2` will contain the remaining elements. If `size_first` is larger than
-/// the number of elements in `original`, all elements are placed in `set1`, and `set2`
-/// will be empty.
-///
-/// # Arguments
-///
-/// * `original` - The `Vec` to be split. This set will be consumed by the function, so it will no
-///   longer be accessible after the function call.
-/// * `size_first` - The number of elements to place in the first set, `set1`.
-///
-/// # Returns
-///
-/// A tuple containing:
-/// * `HashSet<T>` - The first set (`set1`), containing up to `size_first` elements.
-/// * `HashSet<T>` - The second set (`set2`), containing the remaining elements.
-///
-/// # Panics
-///
-/// This function will panic if `size_first` is larger than `original.len()`.
-///
-pub(crate) fn split_into_hashsets<T: std::hash::Hash + Eq>(
-    mut original: Vec<T>,
-    size_first: usize,
-) -> (HashSet<T>, HashSet<T>) {
-    let mut first_set = HashSet::with_capacity(size_first);
-    let mut second_set = HashSet::with_capacity(original.len().saturating_sub(size_first));
-
-    // Fill the first set
-    for _ in 0..size_first.min(original.len()) {
-        if let Some(element) = original.pop() {
-            first_set.insert(element);
-        }
-    }
-
-    // Fill the second set with the remaining elements
-    while let Some(element) = original.pop() {
-        second_set.insert(element);
-    }
-
-    (first_set, second_set)
 }
 
 #[cfg(test)]

@@ -35,7 +35,6 @@
 //! while the overlap file will be named `overlaps.paf`.
 //!
 //! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
-use std::io::Write;
 mod builder;
 
 use std::collections::{HashMap, HashSet};
@@ -56,7 +55,7 @@ use crate::error::LrgeError;
 use crate::estimate::per_read_estimate;
 use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
-use crate::{io, unique_random_set, Estimate, Platform};
+use crate::{io, read_selection::ReadSelector, Estimate, Platform};
 
 /// The default number of reads to use in the all-vs-all strategy.
 pub const DEFAULT_AVA_NUM_READS: usize = 25_000;
@@ -107,17 +106,11 @@ impl AvaStrategy {
     /// Subsample the reads in the input file to `num_reads`.
     fn subsample_reads(&mut self) -> crate::Result<(PathBuf, usize)> {
         debug!("Counting records in input file...");
-        let n_fq_reads = io::count_records(&self.input)?;
+        let selector = ReadSelector::new(&self.input, self.seed)?;
+        let n_fq_reads = selector.num_records();
         debug!("Found {} reads in input file", n_fq_reads);
 
-        if n_fq_reads > u32::MAX as usize {
-            let msg = format!(
-                "Number of reads in input file ({}) exceeds maximum allowed value ({})",
-                n_fq_reads,
-                u32::MAX
-            );
-            return Err(LrgeError::TooManyReadsError(msg));
-        }
+        selector.ensure_supported_record_count()?;
 
         if n_fq_reads < self.num_reads {
             warn!(
@@ -127,30 +120,11 @@ impl AvaStrategy {
             self.num_reads = n_fq_reads;
         }
 
-        let mut indices: HashSet<u32> =
-            unique_random_set(self.num_reads, n_fq_reads as u32, self.seed)
-                .iter()
-                .cloned()
-                .collect();
-
         let out_file = self.tmpdir.join("reads.fa");
 
         debug!("Writing subsampled reads to temporary files...");
-        let mut writer = File::create(&out_file).map(BufWriter::new)?;
-        let mut sum_len = 0;
-        let mut idx: u32 = 0;
-        io::iter_records(&self.input, |id, seq| {
-            if indices.remove(&idx) {
-                sum_len += seq.len();
-                writer.write_all(b">")?;
-                writer.write_all(id)?;
-                writer.write_all(b"\n")?;
-                writer.write_all(seq)?;
-                writer.write_all(b"\n")?;
-            }
-            idx += 1;
-            Ok(())
-        })?;
+        let mut lengths = selector.write_selected(&[(&out_file, self.num_reads)])?;
+        let sum_len = lengths.pop().expect("one output was requested");
 
         self.num_bases = sum_len;
 
