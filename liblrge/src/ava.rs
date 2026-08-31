@@ -123,7 +123,7 @@ impl AvaStrategy {
         let out_file = self.tmpdir.join("reads.fa");
 
         debug!("Writing subsampled reads to temporary files...");
-        let mut lengths = selector.write_selected(&[(&out_file, self.num_reads)])?;
+        let mut lengths = selector.write_selected(&[(&out_file, self.num_reads)], None)?;
         let sum_len = lengths.pop().expect("one output was requested");
 
         self.num_bases = sum_len;

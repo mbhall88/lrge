@@ -184,14 +184,20 @@ impl FromStr for Platform {
     }
 }
 
-/// Generate a shuffled list of `k` indices from 0 to `n`.
+/// Sample `k` distinct indices from 0 to `n`, optionally in proportion to weights.
 ///
 /// # Arguments
 ///
 /// * `k`: The number of indices to generate.
 /// * `n`: The maximum value for the range (exclusive).
 /// * `seed`: An optional seed for the random number generator.
-pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> Vec<u32> {
+/// * `weights`: An optional weight for each index.
+pub(crate) fn sample_unique_indices(
+    k: usize,
+    n: u32,
+    seed: Option<u64>,
+    weights: Option<&[f64]>,
+) -> Vec<u32> {
     // Initialize RNG, using the seed if provided
     let mut rng = match seed {
         Some(seed_value) => StdRng::seed_from_u64(seed_value),
@@ -200,6 +206,37 @@ pub(crate) fn unique_random_set(k: usize, n: u32, seed: Option<u64>) -> Vec<u32>
 
     if k > n as usize {
         panic!("Cannot generate {k} unique values from a range of 0 to {n}",);
+    }
+
+    if let Some(weights) = weights {
+        assert_eq!(weights.len(), n as usize, "expected one weight per read");
+        assert!(
+            weights
+                .iter()
+                .all(|weight| weight.is_finite() && *weight >= 0.0),
+            "read weights must be finite and non-negative"
+        );
+
+        let uniform = weights
+            .first()
+            .is_none_or(|first| *first > 0.0 && weights.iter().all(|weight| weight == first));
+        if !uniform {
+            let positive_weights = weights.iter().filter(|weight| **weight > 0.0).count();
+            if k > positive_weights {
+                panic!("Cannot generate {k} unique values from a range of 0 to {positive_weights}");
+            }
+
+            return rand::seq::index::sample_weighted(
+                &mut rng,
+                n as usize,
+                |index| weights[index],
+                k,
+            )
+            .expect("read weights were validated")
+            .into_iter()
+            .map(|index| index as u32)
+            .collect();
+        }
     }
 
     rand::seq::index::sample(&mut rng, n as usize, k)
@@ -214,12 +251,12 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn test_unique_random_set_basic_functionality() {
+    fn test_sample_unique_indices_basic_functionality() {
         let k = 5;
         let n = 100;
 
         for _ in 0..1000 {
-            let result = unique_random_set(k, n, None);
+            let result = sample_unique_indices(k, n, None, None);
 
             // Check that result has exactly k elements
             assert_eq!(result.len(), k);
@@ -233,27 +270,27 @@ mod tests {
     }
 
     #[test]
-    fn test_unique_random_set_with_seed() {
+    fn test_sample_unique_indices_with_seed() {
         let k = 5;
         let n = 1000000;
         let seed = Some(42);
 
         // Generate two sets with the same seed
-        let result1 = unique_random_set(k, n, seed);
-        let result2 = unique_random_set(k, n, seed);
+        let result1 = sample_unique_indices(k, n, seed, None);
+        let result2 = sample_unique_indices(k, n, seed, None);
 
         // They should be the same due to the same seed
         assert_eq!(result1, result2);
     }
 
     #[test]
-    fn test_unique_random_set_without_seed() {
+    fn test_sample_unique_indices_without_seed() {
         let k = 5;
         let n = 10000000;
 
         // Generate two sets without a seed
-        let result1 = unique_random_set(k, n, None);
-        let result2 = unique_random_set(k, n, None);
+        let result1 = sample_unique_indices(k, n, None, None);
+        let result2 = sample_unique_indices(k, n, None, None);
 
         // They should generally be different
         assert_ne!(result1, result2);
@@ -261,11 +298,48 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Cannot generate")]
-    fn test_unique_random_set_k_greater_than_n() {
+    fn test_sample_unique_indices_k_greater_than_n() {
         let k = 10;
         let n = 5;
 
         // This should panic as k > n is impossible for unique values
-        unique_random_set(k, n, None);
+        sample_unique_indices(k, n, None, None);
+    }
+
+    #[test]
+    fn test_weighted_random_set_draws_in_proportion_to_weights() {
+        let weights = [1.0, 3.0];
+        let mut selections = [0_u32; 2];
+
+        for seed in 0..4096 {
+            let selected = sample_unique_indices(1, 2, Some(seed), Some(&weights));
+            selections[selected[0] as usize] += 1;
+        }
+
+        let ratio = selections[1] as f64 / selections[0] as f64;
+        assert!((2.5..3.5).contains(&ratio), "selection ratio was {ratio}");
+    }
+
+    #[test]
+    fn test_weighted_random_set_with_seed() {
+        let weights = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let seed = Some(42);
+
+        let result1 = sample_unique_indices(2, 5, seed, Some(&weights));
+        let result2 = sample_unique_indices(2, 5, seed, Some(&weights));
+
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot generate 4 unique values from a range of 0 to 3")]
+    fn test_weighted_random_set_k_greater_than_n() {
+        sample_unique_indices(4, 3, Some(42), Some(&[1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot generate")]
+    fn test_weighted_random_set_k_greater_than_positive_weights() {
+        sample_unique_indices(2, 3, Some(42), Some(&[1.0, 0.0, 0.0]));
     }
 }

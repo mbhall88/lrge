@@ -40,9 +40,14 @@ impl ReadSelector {
         Ok(())
     }
 
-    pub(crate) fn write_selected(&self, outputs: &[(&Path, usize)]) -> Result<Vec<usize>> {
+    pub(crate) fn write_selected(
+        &self,
+        outputs: &[(&Path, usize)],
+        weights: Option<&[f64]>,
+    ) -> Result<Vec<usize>> {
         let num_selected = outputs.iter().map(|(_, count)| count).sum();
-        let indices = crate::unique_random_set(num_selected, self.num_records as u32, self.seed);
+        let indices =
+            crate::sample_unique_indices(num_selected, self.num_records as u32, self.seed, weights);
         let mut selected_indices = match outputs.len() {
             2 => {
                 let (first, second) = split_into_hashsets(indices, outputs[0].1);
@@ -129,7 +134,7 @@ mod tests {
         assert_eq!(selector.num_records(), 6);
 
         let lengths = selector
-            .write_selected(&[(target.as_path(), 2), (query.as_path(), 1)])
+            .write_selected(&[(target.as_path(), 2), (query.as_path(), 1)], None)
             .unwrap();
 
         assert_eq!(lengths, vec![6, 3]);
@@ -140,12 +145,57 @@ mod tests {
         assert_eq!(std::fs::read_to_string(query).unwrap(), ">read0\nAAA\n");
 
         let reads = tempdir.path().join("reads.fa");
-        let lengths = selector.write_selected(&[(reads.as_path(), 3)]).unwrap();
+        let lengths = selector
+            .write_selected(&[(reads.as_path(), 3)], None)
+            .unwrap();
 
         assert_eq!(lengths, vec![9]);
         assert_eq!(
             std::fs::read_to_string(reads).unwrap(),
             ">read0\nAAA\n>read1\nCCC\n>read2\nGGG\n"
         );
+    }
+
+    #[test]
+    fn uniform_weights_write_the_same_reads_as_unweighted_selection() {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            input,
+            ">read0\nAAA\n>read1\nCCC\n>read2\nGGG\n>read3\nTTT\n>read4\nACG\n>read5\nTAC"
+        )
+        .unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let unweighted = tempdir.path().join("unweighted.fa");
+        let weighted = tempdir.path().join("weighted.fa");
+        let selector = ReadSelector::new(input.path(), Some(42)).unwrap();
+
+        selector
+            .write_selected(&[(unweighted.as_path(), 3)], None)
+            .unwrap();
+        selector
+            .write_selected(&[(weighted.as_path(), 3)], Some(&[1.0; 6]))
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(unweighted).unwrap(),
+            std::fs::read(weighted).unwrap()
+        );
+    }
+
+    #[test]
+    fn zero_weight_reads_are_not_written() {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        writeln!(input, ">read0\nAAA\n>read1\nCCC\n>read2\nGGG").unwrap();
+        let tempdir = tempfile::tempdir().unwrap();
+        let selected = tempdir.path().join("selected.fa");
+        let selector = ReadSelector::new(input.path(), Some(7)).unwrap();
+        let weights = [1.0, 0.0, 1.0];
+
+        selector
+            .write_selected(&[(selected.as_path(), 2)], Some(&weights))
+            .unwrap();
+
+        let expected = b">read0\nAAA\n>read2\nGGG\n";
+        assert_eq!(std::fs::read(selected).unwrap(), expected);
     }
 }
