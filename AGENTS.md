@@ -6,6 +6,10 @@ Guidance for AI agents working in this repository.
 
 ## Agent skills
 
+### Writing
+
+For all user-facing documentation, GitHub issue and pull request prose, and Git commit messages, run `/avoid-ai-writing` before finalizing the text.
+
 ### Issue tracker
 
 Issues live as GitHub issues on `mbhall88/lrge`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
