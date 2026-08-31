@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use super::{AvaStrategy, DEFAULT_AVA_NUM_READS, DEFAULT_MAX_OVERHANG_RATIO};
+use super::{AvaStrategy, DEFAULT_AVA_NUM_READS};
 use crate::Platform;
+use crate::DEFAULT_MAX_OVERHANG_RATIO;
 
 /// A builder for [`AvaStrategy`].
 pub struct Builder {

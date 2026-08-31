@@ -70,6 +70,8 @@ pub struct Args {
     pub upper_q: f32,
 
     /// Maximum overhang size to alignment length ratio for internal overlap filtering
+    ///
+    /// Only meaningful alongside -F/--filter-contained, which this option requires.
     #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, requires = "filter_contained", hide_short_help = true)]
     pub max_overhang_ratio: f32,
 
@@ -310,6 +312,16 @@ mod tests {
 
         assert!(opts.filter_contained);
         assert_eq!(opts.max_overhang_ratio, 0.05);
+    }
+
+    #[test]
+    fn cli_default_overhang_ratio_matches_the_library_default() {
+        // the CLI has to spell the default as a string for clap; keep it in step with the
+        // single definition in liblrge rather than letting the two drift
+        assert_eq!(
+            MAX_OVERHANG_RATIO.parse::<f32>().unwrap(),
+            liblrge::DEFAULT_MAX_OVERHANG_RATIO
+        );
     }
 
     #[test]

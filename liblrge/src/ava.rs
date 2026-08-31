@@ -60,8 +60,6 @@ use crate::{io, unique_random_set, Estimate, Platform};
 
 /// The default number of reads to use in the all-vs-all strategy.
 pub const DEFAULT_AVA_NUM_READS: usize = 25_000;
-/// The default maximum ratio of overhang to alignment length for internal match filtering.
-pub const DEFAULT_MAX_OVERHANG_RATIO: f32 = 0.2;
 
 /// A strategy that compares overlaps between two sets of reads.
 ///
