@@ -123,6 +123,7 @@ impl TwoSetStrategy {
     fn split_fastq(&mut self) -> crate::Result<(PathBuf, PathBuf, f32)> {
         debug!("Counting records in input file...");
         let selector = ReadSelector::new(&self.input, self.seed)?;
+        info!("{}", selector.depth_skew());
         let n_fq_reads = selector.num_records();
         debug!("Found {} reads in input file", n_fq_reads);
 

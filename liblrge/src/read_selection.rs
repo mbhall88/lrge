@@ -3,28 +3,40 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use crate::depth_skew::{DepthSkewDetector, DepthSkewReport};
 use crate::{io, Result};
 
 pub(crate) struct ReadSelector {
     input: PathBuf,
     num_records: usize,
     seed: Option<u64>,
+    depth_skew: DepthSkewReport,
 }
 
 impl ReadSelector {
     pub(crate) fn new<P: AsRef<Path>>(input: P, seed: Option<u64>) -> Result<Self> {
         let input = input.as_ref().to_path_buf();
-        let num_records = io::count_records(&input)?;
+        let mut detector = DepthSkewDetector::new(seed);
+        let num_records = io::count_records(&input, |sequence| {
+            detector.observe(sequence);
+            Ok(())
+        })?;
+        let depth_skew = detector.finish();
 
         Ok(Self {
             input,
             num_records,
             seed,
+            depth_skew,
         })
     }
 
     pub(crate) fn num_records(&self) -> usize {
         self.num_records
+    }
+
+    pub(crate) fn depth_skew(&self) -> &DepthSkewReport {
+        &self.depth_skew
     }
 
     pub(crate) fn ensure_supported_record_count(&self) -> Result<()> {
@@ -197,5 +209,18 @@ mod tests {
 
         let expected = b">read0\nAAA\n>read2\nGGG\n";
         assert_eq!(std::fs::read(selected).unwrap(), expected);
+    }
+
+    #[test]
+    fn read_selector_samples_records_for_depth_skew_detection() {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        for index in 0..1_000 {
+            writeln!(input, ">read{index}\nACGTACGTACGTACGTACGTACGTACGT").unwrap();
+        }
+
+        let selector = ReadSelector::new(input.path(), Some(42)).unwrap();
+        let sampled = selector.depth_skew().sampled_records;
+
+        assert!((3..=20).contains(&sampled), "sampled {sampled} reads");
     }
 }

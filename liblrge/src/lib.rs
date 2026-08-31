@@ -127,6 +127,7 @@
 //! [doi]: https://doi.org/10.1101/2024.11.27.625777
 #[deny(missing_docs)]
 pub mod ava;
+pub(crate) mod depth_skew;
 pub mod error;
 pub mod estimate;
 pub(crate) mod io;

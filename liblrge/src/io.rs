@@ -118,21 +118,29 @@ impl SeqReader {
     }
 }
 
-pub(crate) fn count_records<P: AsRef<Path>>(path: P) -> io::Result<usize> {
+pub(crate) fn count_records<P: AsRef<Path>>(
+    path: P,
+    mut callback: impl FnMut(&[u8]) -> io::Result<()>,
+) -> io::Result<usize> {
     let mut reader = SeqReader::new(path)?;
     let mut count = 0;
     match &mut reader {
         SeqReader::Fastx(r) => {
             while let Some(res) = r.next() {
-                res.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                let record = res.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+                callback(&record.seq())?;
                 count += 1;
             }
         }
         #[cfg(feature = "alignment")]
         SeqReader::Alignment(r) => {
             let header = r.read_header()?;
+            let mut sequence = Vec::new();
             for res in r.records(&header) {
-                res?;
+                let record = res?;
+                sequence.clear();
+                sequence.extend(record.sequence().as_ref().iter());
+                callback(&sequence)?;
                 count += 1;
             }
         }
@@ -344,6 +352,24 @@ mod tests {
         let mut fastx_reader = parse_fastx_reader(reader).unwrap();
         let record = fastx_reader.next().unwrap().unwrap();
         assert_eq!(record.read_id(), b"SEQ_ID");
+    }
+
+    #[test]
+    fn count_records_visits_each_sequence() {
+        use std::io::Write;
+
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        writeln!(input, ">read0\nACGT\n>read1\nTGCA").unwrap();
+        let mut sequences = Vec::new();
+
+        let count = count_records(input.path(), |sequence| {
+            sequences.push(sequence.to_vec());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(count, 2);
+        assert_eq!(sequences, [b"ACGT".as_slice(), b"TGCA".as_slice()]);
     }
 
     #[test]
