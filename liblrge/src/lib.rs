@@ -131,6 +131,7 @@ pub mod error;
 pub mod estimate;
 pub(crate) mod io;
 pub(crate) mod minimap2;
+pub(crate) mod read_selection;
 pub mod twoset;
 
 /// The default maximum ratio of overhang to alignment length above which an alignment is
