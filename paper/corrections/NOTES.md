@@ -1,9 +1,10 @@
 # Post-publication corrections: working notes
 
 **Status: working notes, not the post.** This file accumulates everything needed to write a
-technical update for lrge users once both mechanisms behind [#29][i29] are addressed. Mechanism 2
-is fixed and measured. Mechanism 1 is specified but not implemented, so its impact numbers do not
-exist yet. Sections marked **TODO** are the gaps.
+technical update for lrge users once both mechanisms behind [#29][i29] are addressed. Mechanism 2 is
+fixed and measured. Mechanism 1 is implemented in [PR #45][pr45] and measured on 17 runs (§4.6), but
+that PR is unmerged and unreleased, and nothing yet bounds how many of the 3,370 benchmark runs its
+default would change. That gap is the main thing still blocking the post.
 
 Paper: Hall MB, Zhou C, Coin LJM. *Genome size estimation from long read overlaps.* Bioinformatics
 41(11), November 2025, btaf593. [doi:10.1093/bioinformatics/btaf593][doi]
@@ -47,6 +48,10 @@ depth-skewed by high-copy plasmids, and `-F` is blind to them only because their
 than the plasmid, which makes the bad overlaps look like dovetails rather than internal matches
 (§4.5). So the tail is fully attributed — mechanism 1 and mechanism 2, with `-F` incidentally
 rescuing part of the mechanism-1 population.
+
+The mechanism-1 fix has since been benchmarked on all 15 ONT sub-0.5x runs (§4.6). Eleven land in
+0.8x–1.2x where none did before, including all seven inert runs. Of the four that do not, three are
+internal-match failures that normalization is not aimed at, and one was missed by the skew detector.
 
 ---
 
@@ -235,7 +240,7 @@ calibration.
 
 ---
 
-## 4. Mechanism 1 — depth skew (specified, not implemented)
+## 4. Mechanism 1 — depth skew (implemented in [PR #45][pr45], unmerged)
 
 Issue [#29][i29] proper. Ticket chain: [#33][i33] (detect skew, observation only) → [#34][i34] (the
 fix) → [#35][i35] (low-memory fallback) → [#36][i36] (fit constants) → [#37][i37] (release) →
@@ -288,8 +293,8 @@ Consequences to carry into the post and the tickets:
   current 0.098x") is still literally correct, because #31 did not change the default path. But it no
   longer isolates what #34 is supposed to fix: measure #34 against the post-#31 `-F` figure, or pick
   a run like `SRR26465526` where mechanism 2 demonstrably does nothing.
-- **TODO:** run `-F` on the remaining 13 ONT sub-0.5x runs before writing the post. Until then the
-  attribution of failures between the two mechanisms is unknown, and the post should not claim one.
+- Done 2026-09-01: `-F` was run on the remaining 13 ONT sub-0.5x runs, which is what made the
+  attribution in §4.4 and §4.5 possible.
 
 ### 4.4 Hypothesis: mechanism 1 *generates* mechanism 2
 
@@ -342,16 +347,21 @@ filter now removes.
    `SRR26465560` substantially while *degrading* the healthy `SRR8618952` (§3.5).
 3. After #34 lands, the residual benefit of `-F` on a skewed run should **shrink**, because
    normalization removes the reads that were generating the internal matches. If `-F` still helps
-   just as much post-normalization, the mechanisms are independent after all.
+   just as much post-normalization, the mechanisms are independent after all. **Tested (§4.6):
+   it shrinks on skew-driven failures and holds on internal-match-driven ones.** `SRR26465560`
+   6.53x -> 1.28x, `SRR26715165` 3.16x -> 1.20x, `SRR26465563` 2.57x -> 1.26x; but `SRR24489322`
+   2.06x -> 2.04x and `DRR213976` 2.74x -> 2.21x.
 4. The two fixes should be **sub-additive** on skewed runs. Worth stating as a risk rather than a
    nicety: `-F` already overshoots on healthy input (1.200x -> 1.467x, §3.5), so normalization plus
-   filtering could over-correct a skewed run past truth. Any decision to enable `-F` automatically
-   under detected skew needs to be made against post-#34 numbers, not the ones in these notes.
+   filtering could over-correct a skewed run past truth. **Confirmed (§4.6): `auto -F` overshoots on
+   14 of 15 outliers.** `-F` must not be switched on automatically under detected skew.
 
-Prediction 3 is the one that decides the framing of the post. If it holds, the post describes one
-underlying problem — uneven depth — with two symptoms and two partial fixes. If it fails, it
-describes two genuinely independent bugs that happened to be found together. **Do not commit to
-either framing before #34 lands and this is tested.**
+Prediction 3 decides the framing of the post, and §4.6 now answers it: **neither framing alone is
+right.** For the eleven runs normalization fixes, the two mechanisms are coupled and `-F`'s residual
+benefit collapses — one problem, two symptoms. For the three runs it does not fix, `-F`'s benefit is
+untouched and the failure is internal matches with no meaningful skew contribution — a genuinely
+separate bug. The post should say the mechanisms overlap on most of the tail without claiming they
+are the same defect.
 
 §4.5 tilts this toward the first reading for the ONT tail — every one of those failures is depth
 skew, and `-F` rescues the subset where the geometry happens to expose it. It says nothing yet about
@@ -419,19 +429,127 @@ opposite overlap geometry, decided by read length against element size.
   depth skew generally. It does not.
 - These runs are the sharpest acceptance test for #34 available: `-F` provably does nothing to them,
   so any improvement is attributable to normalization alone. Better than `SRR26465560` (§4.3), whose
-  error is now known to be substantially mechanism 2.
+  error is now known to be substantially mechanism 2. **Run against [PR #45][pr45]: all seven recover,
+  0.012x–0.027x to 0.92x–1.00x (§4.6).**
 
-### 4.6 Impact — **TODO**
+### 4.6 Impact — measured on 17 runs
 
-This is the section that cannot be written yet, and it is the one that matters most for the post,
-because **mechanism 1 changes default output and therefore changes published numbers**.
+[PR #45][pr45] at commit `254e146` was benchmarked on all 15 ONT sub-0.5x outliers and two controls,
+at paper settings (seed 4556, 10,000 targets, 5,000 queries, 8 threads, correct platform preset).
+One release binary was built and every job invoked it. 37 cells, no failures. Per-row detail is in
+[`depth_normalization_estimates.tsv`](./depth_normalization_estimates.tsv); the `old` column below is
+`rerun_default` from [`rerun_estimates.tsv`](./rerun_estimates.tsv), which is the same input through
+the post-#31 binary at defaults.
 
-- [ ] Re-run the 15 ONT sub-0.5x runs after #34 lands; record before/after.
-- [ ] Re-run a control set of healthy runs to confirm byte-identical output where skew is absent.
-- [ ] Quantify how many of the 3,370 two-set runs change at all.
-- [ ] Decide which published figures/tables would move, and by how much.
-- [ ] Note the interaction with #38 (reported interval quantiles were fitted on the old behaviour).
+`--normalize never` reproduced `rerun_default` exactly on all five runs it was checked against
+(`SRR10861751`, `SRR12247681`, `SRR26465560`, `SRR26715165`, `SRR8618952`), so `old` and `auto` are
+comparable without qualification.
 
+| Run | Skew score | Kept | old | `auto` | `auto -F` |
+|---|---|---|---|---|---|
+| SRR10353548 | 280x | 49.7% | 0.017x | **1.003x** | 1.124x |
+| SRR10388020 | 205x | 52.9% | 0.351x | **1.025x** | 1.137x |
+| SRR26465523 | 142x | 47.0% | 0.027x | **0.980x** | 1.237x |
+| SRR26465563 | 82x | 64.5% | 0.537x | **0.980x** | 1.236x |
+| SRR10861747 | 340x | 36.1% | 0.019x | **0.970x** | 1.056x |
+| SRR26465526 | 425x | 20.3% | 0.012x | **0.961x** | 1.200x |
+| SRR26465521 | 252x | 28.9% | 0.019x | **0.937x** | 1.151x |
+| SRR10861751 | 203x | 33.1% | 0.018x | **0.936x** | 1.034x |
+| SRR26465560 | 165x | 55.2% | 0.098x | **0.932x** | 1.197x |
+| SRR26715165 | 38x | 61.3% | 0.409x | **0.927x** | 1.111x |
+| SRR26465524 | 180x | 29.5% | 0.023x | **0.924x** | 1.166x |
+| DRR213976 | 32x | 96.0% | 0.414x | 0.498x | 1.102x |
+| SRR24489322 | 21x | 91.5% | 0.205x | 0.269x | 0.550x |
+| SRR26715166 | 12x | — | 0.215x | 0.215x | 1.036x |
+| SRR10259778 | 39x | 95.1% | 0.105x | 0.162x | 1.688x |
+| *SRR12247681* (control) | 104x | 54.7% | 0.937x | *1.113x* | — |
+| *SRR8618952* (control) | 3x | — | 1.200x | *1.200x* | — |
+
+Outliers landing in 0.8x–1.2x: 0 of 15 before, 11 of 15 after. Mean absolute relative error
+across the 15 falls from 0.835 to 0.222.
+
+**The seven inert *N. gonorrhoeae* runs of §4.5 all recover**, from 0.012x–0.027x to 0.92x–1.00x.
+That was the acceptance test those notes nominated, on the grounds that `-F` provably does nothing to
+them, so the improvement is attributable to normalization alone. It passes.
+
+#### The four that do not recover
+
+Three of them — `DRR213976`, `SRR24489322`, `SRR10259778` — carry the highest internal-match
+fractions in the ONT set (79.9%, 47.1%, 34.7%). Their skew scores are also the lowest of the
+engaging runs (32x, 21x, 39x), and normalization drops only 4%–9% of their reads. These are
+mechanism-2 failures, and normalization is not aimed at them: `-F` alone took `DRR213976` to 1.132x
+before any of this. Every ONT run below 21% internal fraction lands in 0.92x–1.03x after
+normalization. The converse does not hold — `SRR26715165` (47.7%) and `SRR26465563` (44.1%) recover
+fully — so internal fraction bounds what normalization can do rather than predicting it.
+
+`SRR26715166` is the one implementation finding here. **The detector missed it.** It scores 12.00x
+against the 16x threshold, computed from 69 sampled reads, because the 1% detection sample was
+applied to a 7,473-read input. Forcing the work it declined recovers the
+run: `--normalize always` retains 4,140 of 7,473 reads and returns 1,900,525 bp, or 0.837x, against
+0.215x under `auto`. So normalization would have fixed it and detection stopped it. The run is also
+depth-profiled in §4.5 (5 kb plasmid at 126x median, 39% of mapped bases above 10x median), which is
+independent confirmation that it is skewed. This argues for a floor on the detection sample rather
+than a change to the 16x threshold, and belongs to [#36][i36].
+
+#### The controls
+
+`SRR8618952` is untouched: skew score 3.00x, detector abstains, and the selected `target.fa` and
+`query.fa` are **byte-identical** to `--normalize never` (md5 `7cb387cb…` and `6ee97d83…`). Its depth
+profile is flat: highest 1 kb window 1.9x the median, nothing above 10x. That is the criterion
+"an evenly-covered input produces output identical to the pre-change behaviour", met.
+
+`SRR12247681` regressed. The detector engages at 104x, normalization retains 172,655 of 315,509
+reads, and the estimate moves from 0.937x to 1.113x, so absolute error grows from 6.3% to 11.3%.
+**This is not a false positive.** Its depth profile is as skewed as anything in the failing tail:
+a 3 kb plasmid at 697x chromosomal depth and a 6 kb plasmid at 197x, against a 5,060 kb chromosome
+at 125x, with 39.3% of mapped bases in windows above 10x median. The run was estimating well
+*despite* severe skew.
+
+The gap generalizes past this one run. The detector answers "is this input depth-skewed", and the
+set of skewed runs is larger than the set of runs whose estimates were wrong. Every run in
+the second set is in the first, but not the reverse, and normalization moves runs in both. The 3,345
+benchmark runs that are already correct are exposed to that difference. **Seventeen runs cannot say
+how many of the 3,370 would move.** This sample was picked for being broken, so it yields no
+population rate. Getting one means running the detector across the benchmark, which is its own
+experiment.
+
+#### Cost
+
+On `SRR8618952`, where the detector abstains, three alternating repeats of each mode give
+6.99s / 7.05s / 7.21s for `never` against 71.18s / 72.23s / 72.25s for `auto` — means of 7.08s
+and 71.89s, a 10.2x wall-clock cost, at 1.18 GiB versus 1.19 GiB mean peak RSS. All six returned the
+same estimate, 5,890,324 bp. The modes were interleaved so page-cache warmth cannot favour either.
+The cost is the minimizer depth profile, which `auto` builds over every read during the counting
+pass before it knows whether it will need it; `never` skips profiling entirely. Where the overlap
+stage is heavier the ratio falls. `SRR26465560` runs 62s against 90s and `SRR26715165` 50s against
+89s, but those pairs came from different Slurm jobs and are indicative only. Peak RSS never rose
+materially in any pair; on several skewed runs `auto` used *less* memory, because normalization
+shrinks the pool. Across all 37 cells peak RSS ranged 0.71–4.63 GiB.
+
+#### What this settles from §4.4
+
+**Prediction 3 holds where it was meant to.** On the runs where `-F` used to deliver a large gain and
+normalization now engages hard, the residual benefit of `-F` collapses: `SRR26465560` 6.53x -> 1.28x,
+`SRR26715165` 3.16x -> 1.20x, `SRR26465563` 2.57x -> 1.26x. Normalization is removing the reads that
+were generating those internal matches, which is what the coupling hypothesis predicted. On the three
+mechanism-2-dominated runs it does not: `SRR24489322` 2.06x -> 2.04x, `DRR213976` 2.74x -> 2.21x,
+`SRR10259778` 4.18x -> 10.42x. So the two mechanisms are coupled on skew-driven failures and
+independent on internal-match-driven ones, which is the first reading of §4.4 for most of the tail
+but not a clean one-problem story.
+
+**Prediction 4 holds.** `auto -F` overshoots truth on 14 of 15 outliers, 11 of
+them past 1.1x and four at or beyond 1.2x, topping out at 1.688x (`SRR10259778`). The single
+exception is `SRR24489322` at 0.550x. Mean absolute error, 0.195, is barely better than `auto` alone
+at 0.222, and the errors now point the same way. `-F` must not be switched on automatically under
+detected skew.
+
+#### Still open
+
+- [ ] Run the detector across the 3,370 two-set runs to find how many engage. Nothing here bounds it.
+- [ ] Decide which published figures move. Needs the item above.
+- [ ] Re-derive the reported interval ([#38][i38]): every `auto` row here reports a wide IQR, and the
+      quantiles were fitted on the old selection.
+- [ ] Depth-profile the 10 PacBio sub-0.5x runs (carried from §6).
 ---
 
 ## 5. What the post needs to say about the paper
@@ -461,11 +579,21 @@ Draft position, to revisit once mechanism 1 lands:
       attribution in §3 rests on `-F` response alone. Same experiment, ten more runs.
 - [ ] Does the read-length/element-size ratio predict `-F` response outside *N. gonorrhoeae*?
       `SRR26465560` (§4.3) is the obvious first check.
+- [x] **Are the two mechanisms independent, or is mechanism 2 downstream of mechanism 1?** Both,
+      depending on the run. Coupled on the eleven that normalization fixes, independent on the three
+      it does not (§4.6).
+- [ ] **How many of the 3,370 two-set runs does the detector engage on?** The 17 runs in §4.6 cannot
+      bound this — the sample was chosen for being broken. Needs the detector run across the
+      benchmark, and it gates any statement about which published figures move.
+- [ ] **Should the detection sample have a floor?** `SRR26715166` was missed on 69 sampled reads at
+      1% of a 7,473-read input, and `--normalize always` recovers it to 0.837x (§4.6). That is
+      [#36][i36] territory, but a sampling-size question rather than a threshold question.
+- [ ] **Is a 10.2x wall-clock cost on unskewed input acceptable for a default?** Measured on
+      `SRR8618952` (§4.6). `auto` builds the minimizer profile over every read before it knows whether
+      it needs one.
 - [ ] Should `--max-overhang-ratio` adapt to overlap density rather than being a constant? (§3.6)
 - [ ] Should `-F` ever default on, for some detectable class of input? Current answer: no. (§3.5)
 - [ ] Does the target-depth relationship in §3.4 hold on ONT data, and on skewed input? (§4.4)
-- [ ] Are the two mechanisms independent, or is mechanism 2 partly downstream of mechanism 1? (§4.4)
-      Decides how the post frames the whole thing. Needs #34.
 - [ ] What is the right guidance for users whose read set is too small to fill `-T`? The 338- and
       238-target runs are pathological, and lrge warns but proceeds.
 
@@ -473,8 +601,10 @@ Draft position, to revisit once mechanism 1 lands:
 
 ## 7. Reproduction
 
-Working directory `/scratch/user/uqmhal11/lrge-issue29` (**volatile — scratch, not backed up**). The
-durable artefacts have been copied here:
+Working directories `/scratch/user/uqmhal11/lrge-issue29` (mechanism 2, §3) and
+`/scratch/user/uqmhal11/lrge-issue34-benchmark` (§4.6; run logs, `/usr/bin/time -v` output and kept
+temp dirs under `runs/<accession>/<mode>/`). **Both are scratch and not backed up.** The durable
+artefacts have been copied here:
 
 - [`rerun_estimates.tsv`](./rerun_estimates.tsv) — one row per run: read stats, target bases and
   depth, published lrge estimates, re-run estimates for all three variants, infinite-estimate counts.
@@ -484,10 +614,30 @@ durable artefacts have been copied here:
   Prep mirrors `paper/workflow/scripts/download.sh`.
 - `verify_31_clean.sh` — the default-behaviour-unchanged check (§3.2).
 - `ont_F.sh` — `-F` on ONT accessions already prepped locally.
-- [`depth/`](./depth) — 1 kb windowed depth for the ten *N. gonorrhoeae* runs of §4.5, gzipped:
+- [`depth/`](./depth) — 1 kb windowed depth for the ten *N. gonorrhoeae* runs of §4.5 and the two
+  §4.6 controls (`SRR12247681`, `SRR8618952`), gzipped:
   `contig`, `window index`, `mean depth`. Produced by `depth_windows.sh`, which also prints the
   quantile summary the section quotes.
 - `depth_windows.sh` — maps a prepped read set to its reference and emits the windowed profile.
+- [`depth_normalization_estimates.tsv`](./depth_normalization_estimates.tsv) — the §4.6 benchmark of
+  [PR #45][pr45] at commit `254e146`: one row per accession and mode, with estimate, truth ratio,
+  reported interval, detector verdict and score, retained and total reads, wall time, peak RSS and
+  exit status. `skew_score_source` records whether the score came from the run's own log or from a
+  `-v` rerun, since the not-detected score is only emitted at debug level. Committed identically to
+  this branch and to the PR #45 branch, so it lands once whichever merges first.
+- `run_one.sh`, `batch.sh`, `build.sh` — the §4.6 harness: build the pinned binary once, then run one
+  accession and mode per cell under `/usr/bin/time -v`.
+- `identity_check.sh` / `identity_md5.sh` — the byte-identity check of §4.6, comparing the selected
+  `target.fa` and `query.fa` between `auto` and `never`. lrge nests these in a randomly named
+  subdirectory, so the comparison matches on basename.
+- `diagnose.sh` — reruns an accession at `-v` to surface the debug-level skew score on runs where
+  `auto` abstains, and under `--normalize always` to separate a detector miss from a normalization
+  failure.
+- `timing.sh` — alternates `never` and `auto` across three repeats on one input so page-cache warmth
+  cannot favour either mode.
+- `collect.py` / `summarise.py` — build `depth_normalization_estimates.tsv` from the run directories,
+  and print the §4.6 comparisons (band crossings, mean error, `-F` benefit before and after
+  normalization, control preservation, cost).
 - `ont_31.sh` — the ONT equivalent of `nottested_31.sh` (`-x map-ont`, `-P ont`). Additionally runs
   the default variant under `--keep-temp` and reports the internal-match fraction of its overlap set
   as a `[PAF]` line, for prediction 1 of §4.4. The PAF is deleted afterwards.
@@ -502,6 +652,15 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 
 ## 8. Running log
 
+- **2026-09-02** — [PR #45][pr45] (mechanism 1) benchmarked at commit `254e146` on all 15 ONT
+  sub-0.5x runs plus two controls, 37 cells. Outliers in 0.8x–1.2x go from 0 of 15 to 11 of 15; mean
+  absolute relative error 0.835 -> 0.222. All seven inert *N. gonorrhoeae* runs recover, which is the
+  acceptance test §4.5 nominated. `--normalize never` reproduces `rerun_default` exactly on five runs,
+  and the PacBio control's selected reads are byte-identical under `auto`. Three findings for the PR:
+  the detector missed `SRR26715166` on a 69-read sample, where `--normalize always` recovers it;
+  the healthy-looking ONT control `SRR12247681` is genuinely skewed (3 kb plasmid at 697x chromosomal
+  depth), so the detector fires correctly but the estimate moves 0.937x -> 1.113x; and `auto` costs
+  10.2x wall time on unskewed input. §4.6 written from this, §4.4 predictions 3 and 4 resolved.
 - **2026-08-31** — #31 implemented, reviewed, merged (PR #40). Default behaviour verified unchanged
   on five accessions.
 - **2026-08-31** — three *X. oryzae* runs re-run; mechanism 2 confirmed. Posted to #29.
@@ -538,4 +697,5 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 [i38]: https://github.com/mbhall88/lrge/issues/38
 [i39]: https://github.com/mbhall88/lrge/issues/39
 [pr40]: https://github.com/mbhall88/lrge/pull/40
+[pr45]: https://github.com/mbhall88/lrge/pull/45
 [c2]: https://github.com/mbhall88/lrge/issues/29#issuecomment-5478078544
