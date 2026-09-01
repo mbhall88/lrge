@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use super::{AvaStrategy, DEFAULT_AVA_NUM_READS};
-use crate::Platform;
 use crate::DEFAULT_MAX_OVERHANG_RATIO;
+use crate::{Normalization, Platform};
 
 /// A builder for [`AvaStrategy`].
 pub struct Builder {
@@ -14,6 +14,7 @@ pub struct Builder {
     threads: usize,
     seed: Option<u64>,
     platform: Platform,
+    normalization: Normalization,
 }
 
 impl Default for Builder {
@@ -28,6 +29,7 @@ impl Default for Builder {
             threads: 1,
             seed: None,
             platform: Platform::default(),
+            normalization: Normalization::default(),
         }
     }
 }
@@ -130,6 +132,13 @@ impl Builder {
         self
     }
 
+    /// Set when depth-aware read normalization is applied. The default is
+    /// [`Normalization::Auto`].
+    pub fn normalization(mut self, normalization: Normalization) -> Self {
+        self.normalization = normalization;
+        self
+    }
+
     /// Build the [`AvaStrategy`], using the reads from the given `input` file.
     ///
     /// # Examples
@@ -151,6 +160,7 @@ impl Builder {
             threads: self.threads,
             seed: self.seed,
             platform: self.platform,
+            normalization: self.normalization,
         }
     }
 }

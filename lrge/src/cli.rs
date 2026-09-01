@@ -33,6 +33,10 @@ pub struct Args {
     #[arg(short = 'P', long, value_name = "PLATFORM", value_parser = ["ont", "pb"], default_value = "ont")]
     pub platform: String,
 
+    /// Control depth-aware read normalization
+    #[arg(long, value_name = "MODE", default_value = "auto")]
+    pub normalize: liblrge::Normalization,
+
     /// Exclude overlaps for internal matches
     #[arg(short = 'F', long = "filter-contained")]
     pub filter_contained: bool,
@@ -177,11 +181,33 @@ mod tests {
         let opts = Args::try_parse_from([BIN, "Cargo.toml"]).unwrap();
 
         assert_eq!(opts.input, PathBuf::from("Cargo.toml"));
+        assert_eq!(opts.normalize, liblrge::Normalization::Auto);
         assert_eq!(
             opts.target_num_reads,
             Some(TARGET_NUM_READS.parse().unwrap())
         );
         assert_eq!(opts.query_num_reads, Some(QUERY_NUM_READS.parse().unwrap()));
+    }
+
+    #[test]
+    fn cli_accepts_normalization_modes() {
+        for (mode, expected) in [
+            ("auto", liblrge::Normalization::Auto),
+            ("always", liblrge::Normalization::Always),
+            ("never", liblrge::Normalization::Never),
+        ] {
+            let opts = Args::try_parse_from([BIN, "Cargo.toml", "--normalize", mode]).unwrap();
+            assert_eq!(opts.normalize, expected);
+        }
+    }
+
+    #[test]
+    fn cli_rejects_invalid_normalization_mode() {
+        let error = Args::try_parse_from([BIN, "Cargo.toml", "--normalize", "sometimes"])
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("expected auto, always, or never"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::Platform;
+use crate::{Normalization, Platform};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -18,6 +18,7 @@ pub struct Builder {
     threads: usize,
     seed: Option<u64>,
     platform: Platform,
+    normalization: Normalization,
 }
 
 impl Default for Builder {
@@ -35,6 +36,7 @@ impl Default for Builder {
             threads: 1,
             seed: None,
             platform: Platform::default(),
+            normalization: Normalization::default(),
         }
     }
 }
@@ -160,6 +162,13 @@ impl Builder {
         self
     }
 
+    /// Set when depth-aware read normalization is applied. The default is
+    /// [`Normalization::Auto`].
+    pub fn normalization(mut self, normalization: Normalization) -> Self {
+        self.normalization = normalization;
+        self
+    }
+
     /// Build the [`TwoSetStrategy`], using the reads from the given `input` file.
     ///
     /// # Examples
@@ -183,6 +192,7 @@ impl Builder {
             threads: self.threads,
             seed: self.seed,
             platform: self.platform,
+            normalization: self.normalization,
         }
     }
 }

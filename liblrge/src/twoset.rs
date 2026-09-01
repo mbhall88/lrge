@@ -58,7 +58,9 @@ pub use self::builder::Builder;
 use crate::estimate::per_read_estimate;
 use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
-use crate::{error::LrgeError, io, read_selection::ReadSelector, Estimate, Platform};
+use crate::{
+    error::LrgeError, io, read_selection::ReadSelector, Estimate, Normalization, Platform,
+};
 
 #[cfg(test)]
 pub(crate) use crate::read_selection::split_into_hashsets;
@@ -98,6 +100,8 @@ pub struct TwoSetStrategy {
     seed: Option<u64>,
     /// Sequencing platform of the reads.
     platform: Platform,
+    /// Controls depth-aware read normalization.
+    normalization: Normalization,
 }
 
 impl TwoSetStrategy {
@@ -122,10 +126,8 @@ impl TwoSetStrategy {
 
     fn split_fastq(&mut self) -> crate::Result<(PathBuf, PathBuf, f32)> {
         debug!("Counting records in input file...");
-        let selector = ReadSelector::new(&self.input, self.seed)?;
-        if selector.depth_skew().skewed {
-            warn!("{}", selector.depth_skew());
-        } else {
+        let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?;
+        if self.normalization == Normalization::Auto && !selector.depth_skew().skewed {
             debug!("{}", selector.depth_skew());
         }
         let n_fq_reads = selector.num_records();
@@ -154,15 +156,35 @@ impl TwoSetStrategy {
         let query_file = self.tmpdir.join("query.fa");
 
         debug!("Writing target and query reads to temporary files...");
-        let lengths = selector.write_selected(
+        let selection = selector.write_selected(
             &[
                 (target_file.as_path(), self.target_num_reads),
                 (query_file.as_path(), self.query_num_reads),
             ],
             None,
         )?;
-        let sum_target_len = lengths[0];
-        let sum_query_len = lengths[1];
+        if let Some(message) = selector.normalization_message(&selection) {
+            info!("{message}");
+        }
+        if selection.output_records != [self.target_num_reads, self.query_num_reads] {
+            warn!(
+                "Normalized read pool is smaller than requested ({} < {}); using {} target reads and {} query reads",
+                selection.output_records.iter().sum::<usize>(),
+                self.target_num_reads + self.query_num_reads,
+                selection.output_records[0],
+                selection.output_records[1]
+            );
+            self.target_num_reads = selection.output_records[0];
+            self.query_num_reads = selection.output_records[1];
+        }
+        if self.target_num_reads == 0 || self.query_num_reads == 0 {
+            return Err(LrgeError::TooFewReadsError(format!(
+                "At least one target and one query read are required; found {} target and {} query reads",
+                self.target_num_reads, self.query_num_reads
+            )));
+        }
+        let sum_target_len = selection.lengths[0];
+        let sum_query_len = selection.lengths[1];
 
         self.target_num_bases = sum_target_len;
         self.query_num_bases = sum_query_len;

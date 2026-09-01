@@ -201,6 +201,7 @@ Options:
   -Q, --query <INT>          Query number of reads to use (for two-set strategy; default) [default: 5000]
   -n, --num <INT>            Number of reads to use (for all-vs-all strategy)
   -P, --platform <PLATFORM>  Sequencing platform of the reads [default: ont] [possible values: ont, pb]
+      --normalize <MODE>     Control depth-aware read normalization [default: auto]
   -F, --filter-contained     Exclude overlaps for internal matches 
   -t, --threads <INT>        Number of threads to use [default: 1]
   -C, --keep-temp            Don't clean up temporary files
@@ -310,6 +311,11 @@ Arguments:
           [default: ont]
           [possible values: ont, pb]
 
+      --normalize <MODE>
+          Control depth-aware read normalization
+
+          [default: auto]
+
   -F, --filter-contained
           Exclude overlaps for internal matches
           
@@ -370,6 +376,22 @@ Arguments:
 ## Method
 
 For a full description of the method, see the [paper][doi].
+
+### Uneven read depth
+
+LRGE assumes that sampled reads represent genome positions uniformly. A short plasmid or other
+high-copy sequence can break this assumption by supplying most of the reads, even though it makes
+up little of the genome. The resulting estimate may collapse towards the size of that sequence.
+
+The default `--normalize auto` mode checks minimizer depth before selecting reads. When it detects
+skew, it reduces the chance of retaining reads from high-depth sequence and draws both target and
+query reads from the normalized pool. LRGE reports the skew score and retained read count at INFO
+level when this happens. Inputs without detected skew use the original sampling path unchanged.
+
+Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
+disable both detection and normalization. A wide reported interval means the per-read estimates
+disagree. Uneven depth is one possible cause; repeats, sparse overlaps, or too few sampled reads can
+also widen it.
 
 ### Two-set strategy
 
