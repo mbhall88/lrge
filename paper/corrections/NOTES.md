@@ -283,7 +283,42 @@ Consequences to carry into the post and the tickets:
 - **TODO:** run `-F` on the remaining 13 ONT sub-0.5x runs before writing the post. Until then the
   attribution of failures between the two mechanisms is unknown, and the post should not claim one.
 
-### 4.4 Impact — **TODO**
+### 4.4 Hypothesis: mechanism 1 *generates* mechanism 2
+
+Raised by MBH, 2026-09-01. The two mechanisms may not be independent. If a region is enriched in
+depth, a large share of the read set comes from that region; those reads overlap each other heavily,
+and if the enriched region is a repeat or a multi-copy element, many of those overlaps will be
+internal matches rather than genuine dovetails. On that account mechanism 2 is partly a *symptom* of
+mechanism 1, not a separate defect that happens to co-occur.
+
+This fits the only skewed run measured so far. `SRR26465560` carries six plasmids at up to 167x
+chromosomal depth, and `-F` alone recovers it from 0.098x to 0.643x (§4.3) — which is what you would
+expect if the plasmid-derived reads were contributing a large population of internal matches that the
+filter now removes.
+
+**Predictions, in rough order of how cheaply they can be tested:**
+
+1. Skewed runs should show a higher internal-match fraction in their overlap set than unskewed runs
+   of comparable depth. *Testable now* — measured directly from the PAF; the ONT batch records it.
+2. `-F` should help skewed runs more than unskewed ones. Partially supported already: it recovers
+   `SRR26465560` substantially while *degrading* the healthy `SRR8618952` (§3.5).
+3. After #34 lands, the residual benefit of `-F` on a skewed run should **shrink**, because
+   normalization removes the reads that were generating the internal matches. If `-F` still helps
+   just as much post-normalization, the mechanisms are independent after all.
+4. The two fixes should be **sub-additive** on skewed runs. Worth stating as a risk rather than a
+   nicety: `-F` already overshoots on healthy input (1.200x -> 1.467x, §3.5), so normalization plus
+   filtering could over-correct a skewed run past truth. Any decision to enable `-F` automatically
+   under detected skew needs to be made against post-#34 numbers, not the ones in these notes.
+
+Prediction 3 is the one that decides the framing of the post. If it holds, the post describes one
+underlying problem — uneven depth — with two symptoms and two partial fixes. If it fails, it
+describes two genuinely independent bugs that happened to be found together. **Do not commit to
+either framing before #34 lands and this is tested.**
+
+Note this also complicates §3.4: the target-depth relationship there was fitted on PacBio runs with
+no known skew. Whether recovery-vs-depth looks the same on skewed input is unknown.
+
+### 4.5 Impact — **TODO**
 
 This is the section that cannot be written yet, and it is the one that matters most for the post,
 because **mechanism 1 changes default output and therefore changes published numbers**.
@@ -318,7 +353,9 @@ Draft position, to revisit once mechanism 1 lands:
       before the post is written.
 - [ ] Should `--max-overhang-ratio` adapt to overlap density rather than being a constant? (§3.6)
 - [ ] Should `-F` ever default on, for some detectable class of input? Current answer: no. (§3.5)
-- [ ] Does the target-depth relationship in §3.4 hold on ONT data?
+- [ ] Does the target-depth relationship in §3.4 hold on ONT data, and on skewed input? (§4.4)
+- [ ] Are the two mechanisms independent, or is mechanism 2 partly downstream of mechanism 1? (§4.4)
+      Decides how the post frames the whole thing. Needs #34.
 - [ ] What is the right guidance for users whose read set is too small to fill `-T`? The 338- and
       238-target runs are pathological, and lrge warns but proceeds.
 
@@ -337,6 +374,9 @@ durable artefacts have been copied here:
   Prep mirrors `paper/workflow/scripts/download.sh`.
 - `verify_31_clean.sh` — the default-behaviour-unchanged check (§3.2).
 - `ont_F.sh` — `-F` on ONT accessions already prepped locally.
+- `ont_31.sh` — the ONT equivalent of `nottested_31.sh` (`-x map-ont`, `-P ont`). Additionally runs
+  the default variant under `--keep-temp` and reports the internal-match fraction of its overlap set
+  as a `[PAF]` line, for prediction 1 of §4.4. The PAF is deleted afterwards.
 
 Not copied: raw FASTQs (~17 GB) and lrge logs (~48 MB). The logs hold `Total target bases`, which is
 the only field in the tables above not recoverable from the TSV.
@@ -353,6 +393,11 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 - **2026-08-31** — three *X. oryzae* runs re-run; mechanism 2 confirmed. Posted to #29.
 - **2026-08-31** — remaining seven PacBio sub-0.5x runs re-run; all improve, four land within 0.8%
   of truth. Posted to [#29][c2].
+- **2026-09-01** — MBH raised the coupling hypothesis now recorded as §4.4: depth enrichment should
+  itself produce internal matches, making mechanism 2 partly a symptom of mechanism 1. Reframes what
+  the post is about; cannot be settled until #34 lands.
+- **2026-09-01** — remaining 13 ONT sub-0.5x runs submitted, with internal-match fractions measured
+  from the overlap set. **TODO: record results here.**
 - **2026-09-01** — `-F` tested post-fix on the two most extreme ONT failures. `SRR26465560`
   0.098x -> 0.643x (0.855x at ratio 0.05); `SRR26465526` 0.012x -> 0.013x. This refuted the
   platform split drafted in §2 and forced the rewrite of §2, §4.3 and §6. The run the mechanism-1
