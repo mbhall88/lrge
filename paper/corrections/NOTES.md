@@ -42,9 +42,11 @@ by whether `-F` does anything at all:
 | **Responsive** | 18 | 1.4x–11.3x improvement | all 10 PacBio, plus 8 ONT |
 | **Inert** | 7 | no change (<=1%) | *N. gonorrhoeae*, all collapsed to 0.012x–0.027x |
 
-The responsive class is mechanism 2, and it is most of the tail. The inert class is a **third failure
-mode** that neither #31 nor, necessarily, #34 addresses — see §4.5. Any claim in the post that #29
-was "two mechanisms" needs to account for it.
+The inert class looked at first like a third failure mode. It is not: all seven are heavily
+depth-skewed by high-copy plasmids, and `-F` is blind to them only because their reads are shorter
+than the plasmid, which makes the bad overlaps look like dovetails rather than internal matches
+(§4.5). So the tail is fully attributed — mechanism 1 and mechanism 2, with `-F` incidentally
+rescuing part of the mechanism-1 population.
 
 ---
 
@@ -326,12 +328,16 @@ filter now removes.
    | SRR10388020 | 9.9% | 1.5x |
    | SRR10353548 | 9.2% | 1.0x |
 
-   **Caveat: this is not yet evidence for the coupling hypothesis.** It shows internal-match fraction
-   predicts `-F` response, which is close to tautological. The hypothesis needs the *further* step
-   that internal-match fraction tracks *depth skew*, and no depth measurement has been made on these
-   runs. That is the missing experiment — see the TODO in §4.5, which serves both purposes.
-   Internal fraction was also not measured on the PacBio runs; adding it means re-running them with
-   `--keep-temp`.
+   **Now tested against depth (§4.5), and the result refines the hypothesis rather than confirming
+   it.** All ten *N. gonorrhoeae* runs are heavily skewed by high-copy plasmids, yet their
+   internal-match fractions range 9%–48%. So skew magnitude does **not** predict internal-match
+   fraction — if anything the most extremely skewed runs have the *fewest* internal matches.
+
+   What decides it is read length against the size of the enriched element. The coupling is real —
+   depth skew is what generates the bad overlaps — but it does not have a fixed signature: the same
+   skew presents as dovetails or as internal matches depending on that ratio, and only the latter is
+   visible to `-F`. Internal fraction was not measured on the PacBio runs; adding it means re-running
+   them with `--keep-temp`.
 2. `-F` should help skewed runs more than unskewed ones. Partially supported already: it recovers
    `SRR26465560` substantially while *degrading* the healthy `SRR8618952` (§3.5).
 3. After #34 lands, the residual benefit of `-F` on a skewed run should **shrink**, because
@@ -347,44 +353,73 @@ underlying problem — uneven depth — with two symptoms and two partial fixes.
 describes two genuinely independent bugs that happened to be found together. **Do not commit to
 either framing before #34 lands and this is tested.**
 
+§4.5 tilts this toward the first reading for the ONT tail — every one of those failures is depth
+skew, and `-F` rescues the subset where the geometry happens to expose it. It says nothing yet about
+the PacBio tail, where no depth profiling has been done.
+
 Note this also complicates §3.4: the target-depth relationship there was fitted on PacBio runs with
 no known skew. Whether recovery-vs-depth looks the same on skewed input is unknown.
 
-### 4.5 A third failure mode: the inert *N. gonorrhoeae* runs
+### 4.5 The inert runs are mechanism 1 after all — read length decides whether `-F` sees it
 
-Seven runs, all *N. gonorrhoeae*, collapse to 0.012x–0.027x and do not move under `-F` at all:
+**This section supersedes an earlier draft that called these a third failure mode. They are not.**
 
-| Run | Truth | Target depth | Default | `-F` | `-F` @0.05 | Internal frac. | inf |
-|---|---|---|---|---|---|---|---|
-| SRR10353548 | 2,269,994 | 17.0x | 0.017x | 0.017x | 0.041x | 9.2% | 0 |
-| SRR10861747 | 2,211,092 | 22.2x | 0.019x | 0.019x | 0.028x | 12.3% | 0 |
-| SRR10861751 | 2,220,590 | 22.3x | 0.018x | 0.018x | 0.023x | 12.3% | 0 |
-| SRR26465521 | 2,285,943 | 26.5x | 0.019x | 0.019x | 0.026x | 18.8% | 12 |
-| SRR26465524 | 2,287,581 | 29.9x | 0.023x | 0.024x | 0.032x | 19.5% | 18 |
-| SRR26465523 | 2,235,838 | 24.7x | 0.027x | 0.027x | 0.085x | 20.6% | 15 |
-| SRR26465526 | 2,230,369 | 25.1x | 0.012x | 0.013x | 0.023x | not measured | 18 |
+Depth profiles were run on all ten *N. gonorrhoeae* sub-0.5x runs — the seven inert ones and, as a
+same-species control, the three that respond to `-F`. Every one of the ten is heavily depth-skewed,
+and in exactly the same way: small, very high-copy plasmids.
 
-What is diagnostic is that **nothing looks wrong with the inputs**. Target depth is healthy
-(17x–30x), and essentially no query read fails to find an overlap (0–18 infinite estimates out of
-5,000), so there is no shortage of overlaps. The per-read estimates are simply tiny — the
-mechanism-1 signature of query reads overlapping far too many targets, but at an extreme, and
-*without* those overlaps being internal matches.
+| Run | Class | Chromosome | Small plasmids | Large plasmid |
+|---|---|---|---|---|
+| SRR10353548 | inert | 2,219 kb @ 1x | 6 kb @ 257x, 5 kb @ 226x | 42 kb @ 2x |
+| SRR26465526 | inert | 2,179 kb @ 1x | 6 kb @ 606x, 5 kb @ 333x | 43 kb @ 8x |
+| SRR26465524 | inert | 2,236 kb @ 1x | 6 kb @ 338x, 5 kb @ 177x | 43 kb @ 17x |
+| SRR10388020 | responsive | 2,167 kb @ 1x | 6 kb @ 246x, 5 kb @ 229x | 43 kb @ 5x |
+| SRR26715165 | responsive | 2,228 kb @ 1x | 5 kb @ 63x | 40 kb @ 14x |
+| SRR26715166 | responsive | 2,229 kb @ 1x | 5 kb @ 126x | 40 kb @ 20x |
 
-**Working hypothesis for why `-F` cannot touch them.** An internal match requires the shared repeat
-to be *shorter* than the reads, so unaligned flanks remain on both sides — that is the overhang the
-filter keys on. If the repeat is *longer* than the read, reads drawn from different copies align end
-to end and are geometrically indistinguishable from a genuine dovetail. No overhang-based filter can
-separate those, at any threshold. The measured internal-match fractions fit: 9–21% here against
-25–80% in the responsive ONT runs (§4.4).
+Roughly half of all mapped depth sits in ~11 kb of plasmid. So the earlier reading in these notes —
+"nothing looks wrong with the inputs" — was wrong: the inputs are as skewed as anything in the
+benchmark. What was actually observed is that *the overlaps they produce do not look like internal
+matches*, which is a different claim.
 
-**This matters for #34 as much as #31.** Depth normalization strips reads from regions that are
-*over-represented*. If these runs collapse because of dispersed repeats at ordinary depth rather than
-an enriched element, the reads are not over-represented and normalization has nothing to remove.
-Whether these seven are depth-skewed at all is **unmeasured**, and it decides whether #34 helps them.
+**Depth skew does not predict whether `-F` helps. Read length does.**
 
-- [ ] **TODO, cheap and high-value:** compute the depth profile of these seven against their
-      references (`depth_windows.sh` did this for earlier runs). If flat, the benchmark tail contains
-      a third mechanism that neither current fix addresses, and the post must say so.
+| Run | Class | Median read | Top plasmid | read/plasmid | Internal frac. | `-F` gain |
+|---|---|---|---|---|---|---|
+| SRR26715165 | responsive | 11,824 | 5 kb | **2.36** | 47.7% | 3.2x |
+| SRR26715166 | responsive | 9,406 | 5 kb | **1.88** | 25.2% | 4.8x |
+| SRR26465524 | inert | 6,867 | 6 kb | 1.14 | 19.5% | 1.0x |
+| SRR26465521 | inert | 6,110 | 6 kb | 1.02 | 18.8% | 1.0x |
+| SRR10861751 | inert | 4,986 | 5 kb | 1.00 | 12.3% | 1.0x |
+| SRR10861747 | inert | 4,867 | 5 kb | 0.97 | 12.3% | 1.0x |
+| SRR26465523 | inert | 5,563 | 6 kb | 0.93 | 20.6% | 1.0x |
+| SRR26465526 | inert | 5,607 | 6 kb | 0.93 | — | 1.0x |
+| SRR10353548 | inert | 3,928 | 6 kb | 0.65 | 9.2% | 1.0x |
+| SRR10388020 | responsive | 3,687 | 6 kb | 0.61 | 9.9% | 1.5x |
+
+Every run whose reads are shorter than ~1.2 plasmid-lengths is inert. Both runs whose reads are
+~2 plasmid-lengths respond strongly, and they carry the highest internal-match fractions.
+`SRR10388020` is the one that does not fit — short reads, low internal fraction, yet a 1.5x gain, the
+weakest of the responders.
+
+**The geometric account.** Reads piled on a small circular plasmid overlap each other. If a read is
+*shorter* than the plasmid, two such reads align end to end with almost nothing hanging off — the
+geometry of a genuine dovetail, near-zero overhang, invisible to any overhang threshold. If a read is
+*longer* than the plasmid it wraps past the origin, so two such reads share only part of their length
+and leave large unaligned flanks — an internal match, which `-F` removes. Same biological cause,
+opposite overlap geometry, decided by read length against element size.
+
+**Consequences:**
+
+- The seven inert runs are **mechanism 1**, so #34 should fix them, and the benchmark tail does not
+  contain an unexplained third mechanism. All 25 sub-0.5x runs are now attributed.
+- `-F` rescuing a skewed run is **incidental**, not a fix for skew. It happens to catch the subset
+  where read length exceeds the enriched element. That is worth saying plainly in the post, because
+  the *X. oryzae* and *C. belfantii* recoveries otherwise invite the reading that `-F` addresses
+  depth skew generally. It does not.
+- These runs are the sharpest acceptance test for #34 available: `-F` provably does nothing to them,
+  so any improvement is attributable to normalization alone. Better than `SRR26465560` (§4.3), whose
+  error is now known to be substantially mechanism 2.
 
 ### 4.6 Impact — **TODO**
 
@@ -418,9 +453,14 @@ Draft position, to revisit once mechanism 1 lands:
 
 - [x] **Are the ONT sub-0.5x failures immune to mechanism 2?** No, and not uniformly. All 25
       sub-0.5x runs have now been tested: 18 respond to `-F`, 7 are completely inert (§2, §4.5).
-- [ ] **Are the 7 inert *N. gonorrhoeae* runs depth-skewed?** Decides whether #34 helps them or
-      whether the tail holds a third mechanism with no fix in flight. Cheapest open experiment (§4.5).
-- [ ] Does internal-match fraction track depth skew, as §4.4 requires? Needs the same depth profiles.
+- [x] **Are the 7 inert *N. gonorrhoeae* runs depth-skewed?** Yes, severely — 5–6 kb plasmids at
+      226x–606x chromosomal depth. They are mechanism 1, and #34 should fix them (§4.5).
+- [x] **Does internal-match fraction track depth skew?** No. It tracks read length against the size
+      of the enriched element (§4.5).
+- [ ] Are the PacBio sub-0.5x runs depth-skewed too? No profiling has been done on them, so the
+      attribution in §3 rests on `-F` response alone. Same experiment, ten more runs.
+- [ ] Does the read-length/element-size ratio predict `-F` response outside *N. gonorrhoeae*?
+      `SRR26465560` (§4.3) is the obvious first check.
 - [ ] Should `--max-overhang-ratio` adapt to overlap density rather than being a constant? (§3.6)
 - [ ] Should `-F` ever default on, for some detectable class of input? Current answer: no. (§3.5)
 - [ ] Does the target-depth relationship in §3.4 hold on ONT data, and on skewed input? (§4.4)
@@ -444,6 +484,10 @@ durable artefacts have been copied here:
   Prep mirrors `paper/workflow/scripts/download.sh`.
 - `verify_31_clean.sh` — the default-behaviour-unchanged check (§3.2).
 - `ont_F.sh` — `-F` on ONT accessions already prepped locally.
+- [`depth/`](./depth) — 1 kb windowed depth for the ten *N. gonorrhoeae* runs of §4.5, gzipped:
+  `contig`, `window index`, `mean depth`. Produced by `depth_windows.sh`, which also prints the
+  quantile summary the section quotes.
+- `depth_windows.sh` — maps a prepped read set to its reference and emits the windowed profile.
 - `ont_31.sh` — the ONT equivalent of `nottested_31.sh` (`-x map-ont`, `-P ont`). Additionally runs
   the default variant under `--keep-temp` and reports the internal-match fraction of its overlap set
   as a `[PAF]` line, for prediction 1 of §4.4. The PAF is deleted afterwards.
@@ -466,9 +510,13 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 - **2026-09-01** — MBH raised the coupling hypothesis now recorded as §4.4: depth enrichment should
   itself produce internal matches, making mechanism 2 partly a symptom of mechanism 1. Reframes what
   the post is about; cannot be settled until #34 lands.
+- **2026-09-01** — depth profiles on all 10 *N. gonorrhoeae* sub-0.5x runs (7 inert + 3 responsive
+  controls). All ten are plasmid-skewed; the inert ones are mechanism 1, not a third mechanism, and
+  §4.5 was rewritten. `-F` response tracks read length against plasmid size, not skew magnitude.
 - **2026-09-01** — remaining 13 ONT sub-0.5x runs completed, with internal-match fractions measured
   from the overlap set. All 25 sub-0.5x runs are now tested. Result: 18 respond to `-F`, 7 (all
-  *N. gonorrhoeae*, all ~0.02x) are inert, which is a third failure mode (§4.5). Internal-match
+  *N. gonorrhoeae*, all ~0.02x) are inert — provisionally read as a third failure mode, corrected the
+  same day by the depth profiles above (§4.5). Internal-match
   fraction predicts response (§4.4, prediction 1). `-F` overshoots truth on 3 of 13 ONT runs, which
   strengthens §3.5.
 - **2026-09-01** — `-F` tested post-fix on the two most extreme ONT failures. `SRR26465560`
