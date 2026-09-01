@@ -9,13 +9,17 @@ const KMER_LENGTH: usize = 15;
 const WINDOW_WIDTH: usize = 9;
 const READ_SAMPLE_DENOMINATOR: u32 = 100;
 const SKETCH_ROWS: usize = 4;
+// Use 2^20 columns so sketch_index can replace modulo with a bit mask.
 const SKETCH_WIDTH: usize = 1 << 20;
+// Retain at most 2^16 distinct minimizers to bound the quantile calculation.
 const DISTINCT_SAMPLE_SIZE: usize = 1 << 16;
 const MIN_DISTINCT_MINIMIZERS: usize = 128;
+// Express the 99.9th percentile as 999 parts per thousand to avoid float rounding.
 const HIGH_QUANTILE_PER_MILLE: usize = 999;
 const SKEW_THRESHOLD: f64 = 16.0;
 
 pub(crate) struct DepthSkewReport {
+    /// Ratio of the 99.9th percentile minimizer count to the median count.
     pub(crate) score: Option<f64>,
     pub(crate) skewed: bool,
     pub(crate) sampled_records: usize,
@@ -32,7 +36,7 @@ impl fmt::Display for DepthSkewReport {
                 };
                 write!(
                     formatter,
-                    "{verdict} (p99.9/median minimizer count: {score:.2}; sampled reads: {})",
+                    "{verdict} (99.9th percentile minimizer count is {score:.2}x the median; sampled reads: {})",
                     self.sampled_records
                 )
             }
@@ -263,7 +267,7 @@ mod tests {
 
         assert_eq!(
             report.to_string(),
-            "Depth skew detected (p99.9/median minimizer count: 21.25; sampled reads: 87)"
+            "Depth skew detected (99.9th percentile minimizer count is 21.25x the median; sampled reads: 87)"
         );
     }
 }
