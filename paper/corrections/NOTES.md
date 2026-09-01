@@ -34,16 +34,17 @@ From `paper/results/estimates/estimates.tsv`, two-set strategy, relative to trut
 | > 1.2x | 790 | 23.44% |
 | **Total** | **3,370** | |
 
-The 25 sub-0.5x runs partition cleanly by platform, and the partition turns out to track the two
-mechanisms:
+The 25 sub-0.5x runs split 10 PacBio / 15 ONT, the latter dominated by *N. gonorrhoeae* (9 runs) and
+*E. faecium* (2). It is tempting to map that split onto the two mechanisms. **Do not — it was tested
+and it is wrong.** See §4.4: the *E. faecium* run that #29 was reported against, and which the
+mechanism-1 spec is written around, recovers most of its error under the mechanism-2 fix.
 
-- **10 PacBio** — all tested, all improve under the mechanism-2 fix. See §3.
-- **15 ONT** — dominated by *N. gonorrhoeae* (9 runs) and *E. faecium* (2). Mechanism-1 territory.
-  See §4.
+What holds is weaker and more useful:
 
-That platform split is a genuine finding and belongs in the post, but note the caveat in §6: it is
-currently an observation about which runs were tested, not a demonstration that ONT failures are
-immune to mechanism 2.
+- **All 10 PacBio sub-0.5x runs improve under the mechanism-2 fix**, four of them to within 0.8% of
+  truth (§3).
+- **The ONT failures are heterogeneous.** At least one is substantially mechanism 2; at least one is
+  untouched by it. The remaining 13 are untested.
 
 ---
 
@@ -236,9 +237,13 @@ fix) → [#35][i35] (low-memory fallback) → [#36][i36] (fit constants) → [#3
 
 The median of per-read estimates collapses when a subpopulation of query reads comes from
 high-depth sequence. `SRR26465560` (*E. faecium*, the run #29 was reported against) returns 315 kb
-against a truth of 3.20 Mb, because six plasmids totalling 81 kb sit at up to 167x chromosomal
-depth and supply the majority of the reads. The estimator returns the size of the over-represented
-element rather than the genome.
+against a truth of 3.20 Mb. Six plasmids totalling 81 kb sit at up to 167x chromosomal depth and
+supply the majority of the reads, so the estimator returns something closer to the size of the
+over-represented element than the genome.
+
+**Caveat added 2026-09-01:** this run is not a clean example of the mechanism. Most of its error
+turns out to be mechanism 2 — see §4.3. The depth-skew diagnosis stands as a description of what
+happens under skew; it is no longer safe to use this particular run as the demonstration of it.
 
 ### 4.2 The planned fix
 
@@ -250,7 +255,35 @@ Normalization and subsampling happen together via weighted reservoir sampling, s
 unchanged. `--normalize auto|always|never`, defaulting to `auto`; an unskewed run takes the existing
 path and produces byte-identical output.
 
-### 4.3 Impact — **TODO**
+### 4.3 The two mechanisms overlap on the reported run
+
+`-F` was run post-fix on the two most extreme ONT failures (truth-relative, default flags in the
+first column):
+
+| Run | Organism | Truth | Target depth | Default | `-F` | `-F` @0.05 |
+|---|---|---|---|---|---|---|
+| SRR26465560 | *E. faecium* | 3,198,172 | 17.6x | 0.098x | **0.643x** | **0.855x** |
+| SRR26465526 | *N. gonorrhoeae* | 2,230,369 | 25.1x | 0.012x | 0.013x | 0.023x |
+
+**`SRR26465560` is the run #29 was reported against and the run [#34][i34] is specified around, and
+most of its error is mechanism 2, not depth skew.** It recovers from 0.098x to 0.643x with no
+depth-aware selection at all, and to 0.855x at the stricter threshold. Its residual gap is consistent
+with genuine depth skew on top — at 17.6x target depth the §3.4 relationship predicts roughly 0.9x
+from mechanism 2 alone, and it reaches 0.643x — but the plasmid story is no longer the whole story.
+
+`SRR26465526` is the opposite: 25x target depth, and `-F` moves it from 0.012x to 0.013x. Whatever
+collapses that run, mechanism 2 is not it.
+
+Consequences to carry into the post and the tickets:
+
+- The #34 acceptance criterion ("`SRR26465560` estimates substantially closer to 3.20 Mb than its
+  current 0.098x") is still literally correct, because #31 did not change the default path. But it no
+  longer isolates what #34 is supposed to fix: measure #34 against the post-#31 `-F` figure, or pick
+  a run like `SRR26465526` where mechanism 2 demonstrably does nothing.
+- **TODO:** run `-F` on the remaining 13 ONT sub-0.5x runs before writing the post. Until then the
+  attribution of failures between the two mechanisms is unknown, and the post should not claim one.
+
+### 4.4 Impact — **TODO**
 
 This is the section that cannot be written yet, and it is the one that matters most for the post,
 because **mechanism 1 changes default output and therefore changes published numbers**.
@@ -280,9 +313,9 @@ Draft position, to revisit once mechanism 1 lands:
 
 ## 6. Open questions
 
-- [ ] **Are the 15 ONT sub-0.5x failures immune to mechanism 2, or merely untested against it?**
-      The platform split in §2 is currently an artefact of which runs were chosen. Running `-F` on
-      the ONT failures would settle it. (Partially addressed — see §8.)
+- [x] **Are the ONT sub-0.5x failures immune to mechanism 2?** No. Tested on two: one recovers most
+      of its error under `-F`, one is untouched. See §4.3. **13 remain untested** and should be run
+      before the post is written.
 - [ ] Should `--max-overhang-ratio` adapt to overlap density rather than being a constant? (§3.6)
 - [ ] Should `-F` ever default on, for some detectable class of input? Current answer: no. (§3.5)
 - [ ] Does the target-depth relationship in §3.4 hold on ONT data?
@@ -320,8 +353,10 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 - **2026-08-31** — three *X. oryzae* runs re-run; mechanism 2 confirmed. Posted to #29.
 - **2026-08-31** — remaining seven PacBio sub-0.5x runs re-run; all improve, four land within 0.8%
   of truth. Posted to [#29][c2].
-- **2026-09-01** — `-F` tested on the two most extreme ONT failures (SRR26465560, SRR26465526) to
-  probe the platform split in §2. **TODO: record result here.**
+- **2026-09-01** — `-F` tested post-fix on the two most extreme ONT failures. `SRR26465560`
+  0.098x -> 0.643x (0.855x at ratio 0.05); `SRR26465526` 0.012x -> 0.013x. This refuted the
+  platform split drafted in §2 and forced the rewrite of §2, §4.3 and §6. The run the mechanism-1
+  spec is built around is substantially a mechanism-2 failure.
 
 [doi]: https://doi.org/10.1093/bioinformatics/btaf593
 [i8]: https://github.com/mbhall88/lrge/issues/8
