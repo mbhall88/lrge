@@ -34,3 +34,5 @@ first batch was run from an isolated worktree while another agent was editing th
 - `SRR8618952.n*` — the read-count control series (see NOTES.md §3.5).
 - `SRR26465560.fixed-F*`, `SRR26465526.fixed-F*` — the ONT probe of §4.3, run with `-P ont`. All
   other files are `-P pb`.
+- The 13 ONT accessions of §4.4/§4.5 were run with `-P ont` by `../ont_31.sh`, which also recorded
+  each run's internal-match fraction; those figures live in `../rerun_estimates.tsv`, not here.

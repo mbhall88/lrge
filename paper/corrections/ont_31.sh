@@ -59,7 +59,7 @@ variant () {
 # default run keeps its overlaps so the internal-match fraction can be measured
 paftmp="${tmpdir}/paf"; mkdir -p "$paftmp"
 "$LRGE" -t "$threads" -vv -P ont -s "$LRGE_SEED" -T "$LRGE_TARGET" -Q "$LRGE_QUERY" \
-    --keep-temp --temp-dir "$paftmp" -o "${run}.fixed-default.size" "${run}.fastq.gz" \
+    --keep-temp --temp "$paftmp" -o "${run}.fixed-default.size" "${run}.fastq.gz" \
     2> "${run}.fixed-default.log"
 grep -F 'Estimate for' "${run}.fixed-default.log" | awk '{print $NF}' > "${run}.fixed-default.perread.txt"
 echo "[RESULT] $run fixed-default estimate=$(cat "${run}.fixed-default.size") n_inf=$(grep -c inf "${run}.fixed-default.perread.txt")"

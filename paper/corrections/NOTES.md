@@ -34,17 +34,17 @@ From `paper/results/estimates/estimates.tsv`, two-set strategy, relative to trut
 | > 1.2x | 790 | 23.44% |
 | **Total** | **3,370** | |
 
-The 25 sub-0.5x runs split 10 PacBio / 15 ONT, the latter dominated by *N. gonorrhoeae* (9 runs) and
-*E. faecium* (2). It is tempting to map that split onto the two mechanisms. **Do not — it was tested
-and it is wrong.** See §4.4: the *E. faecium* run that #29 was reported against, and which the
-mechanism-1 spec is written around, recovers most of its error under the mechanism-2 fix.
+**All 25 have now been re-run with the mechanism-2 fix.** They do not split by platform — they split
+by whether `-F` does anything at all:
 
-What holds is weaker and more useful:
+| Class | Runs | `-F` response | What they are |
+|---|---|---|---|
+| **Responsive** | 18 | 1.4x–11.3x improvement | all 10 PacBio, plus 8 ONT |
+| **Inert** | 7 | no change (<=1%) | *N. gonorrhoeae*, all collapsed to 0.012x–0.027x |
 
-- **All 10 PacBio sub-0.5x runs improve under the mechanism-2 fix**, four of them to within 0.8% of
-  truth (§3).
-- **The ONT failures are heterogeneous.** At least one is substantially mechanism 2; at least one is
-  untouched by it. The remaining 13 are untested.
+The responsive class is mechanism 2, and it is most of the tail. The inert class is a **third failure
+mode** that neither #31 nor, necessarily, #34 addresses — see §4.5. Any claim in the post that #29
+was "two mechanisms" needs to account for it.
 
 ---
 
@@ -191,6 +191,12 @@ On `SRR8618952` — a healthy *X. oryzae* run, 14.9x target depth — `-F` moves
 1.200x to 1.467x. Turning it on unconditionally would trade a rare under-estimate for a common
 over-estimate.
 
+**The ONT batch makes this sharper: `-F` overshoots on runs it is supposed to rescue.** Three of the
+13 land above truth (`SRR26465563` 1.380x, `SRR26715165` 1.294x, `DRR213976` 1.132x), and at
+`--max-overhang-ratio 0.05` five do, two of them past 2x (`SRR26465563` 2.220x, `SRR26715165`
+2.040x). So `-F` is not a safe default even restricted to the runs that respond to it: on this
+evidence it converts roughly a third of its successes into over-estimates.
+
 **The read-count control.** Before the mechanism was identified, small read count was the leading
 hypothesis, since every *X. oryzae* failure had one. `SRR8618952` was subsampled to test it directly
 (truth 4,907,789, default flags):
@@ -299,7 +305,33 @@ filter now removes.
 **Predictions, in rough order of how cheaply they can be tested:**
 
 1. Skewed runs should show a higher internal-match fraction in their overlap set than unskewed runs
-   of comparable depth. *Testable now* — measured directly from the PAF; the ONT batch records it.
+   of comparable depth. **Partially tested, and the direction holds.** Measured on the 13 ONT runs
+   (`[PAF]` lines, `internal_frac_0.2` in the TSV), internal-match fraction predicts whether `-F`
+   helps: every run at >=25% responds (gain 2.1x–4.8x), and 6 of the 7 below 21% are completely inert
+   (§4.5). The one exception is SRR10388020 at 9.9%, which still gains 1.5x.
+
+   | Run | Internal frac. | `-F` gain |
+   |---|---|---|
+   | DRR213976 | 79.9% | 2.7x |
+   | SRR26715165 | 47.7% | 3.2x |
+   | SRR24489322 | 47.1% | 2.1x |
+   | SRR26465563 | 44.1% | 2.6x |
+   | SRR10259778 | 34.7% | 4.2x |
+   | SRR26715166 | 25.2% | 4.8x |
+   | SRR26465523 | 20.6% | 1.0x |
+   | SRR26465524 | 19.5% | 1.0x |
+   | SRR26465521 | 18.8% | 1.0x |
+   | SRR10861751 | 12.3% | 1.0x |
+   | SRR10861747 | 12.3% | 1.0x |
+   | SRR10388020 | 9.9% | 1.5x |
+   | SRR10353548 | 9.2% | 1.0x |
+
+   **Caveat: this is not yet evidence for the coupling hypothesis.** It shows internal-match fraction
+   predicts `-F` response, which is close to tautological. The hypothesis needs the *further* step
+   that internal-match fraction tracks *depth skew*, and no depth measurement has been made on these
+   runs. That is the missing experiment — see the TODO in §4.5, which serves both purposes.
+   Internal fraction was also not measured on the PacBio runs; adding it means re-running them with
+   `--keep-temp`.
 2. `-F` should help skewed runs more than unskewed ones. Partially supported already: it recovers
    `SRR26465560` substantially while *degrading* the healthy `SRR8618952` (§3.5).
 3. After #34 lands, the residual benefit of `-F` on a skewed run should **shrink**, because
@@ -318,7 +350,43 @@ either framing before #34 lands and this is tested.**
 Note this also complicates §3.4: the target-depth relationship there was fitted on PacBio runs with
 no known skew. Whether recovery-vs-depth looks the same on skewed input is unknown.
 
-### 4.5 Impact — **TODO**
+### 4.5 A third failure mode: the inert *N. gonorrhoeae* runs
+
+Seven runs, all *N. gonorrhoeae*, collapse to 0.012x–0.027x and do not move under `-F` at all:
+
+| Run | Truth | Target depth | Default | `-F` | `-F` @0.05 | Internal frac. | inf |
+|---|---|---|---|---|---|---|---|
+| SRR10353548 | 2,269,994 | 17.0x | 0.017x | 0.017x | 0.041x | 9.2% | 0 |
+| SRR10861747 | 2,211,092 | 22.2x | 0.019x | 0.019x | 0.028x | 12.3% | 0 |
+| SRR10861751 | 2,220,590 | 22.3x | 0.018x | 0.018x | 0.023x | 12.3% | 0 |
+| SRR26465521 | 2,285,943 | 26.5x | 0.019x | 0.019x | 0.026x | 18.8% | 12 |
+| SRR26465524 | 2,287,581 | 29.9x | 0.023x | 0.024x | 0.032x | 19.5% | 18 |
+| SRR26465523 | 2,235,838 | 24.7x | 0.027x | 0.027x | 0.085x | 20.6% | 15 |
+| SRR26465526 | 2,230,369 | 25.1x | 0.012x | 0.013x | 0.023x | not measured | 18 |
+
+What is diagnostic is that **nothing looks wrong with the inputs**. Target depth is healthy
+(17x–30x), and essentially no query read fails to find an overlap (0–18 infinite estimates out of
+5,000), so there is no shortage of overlaps. The per-read estimates are simply tiny — the
+mechanism-1 signature of query reads overlapping far too many targets, but at an extreme, and
+*without* those overlaps being internal matches.
+
+**Working hypothesis for why `-F` cannot touch them.** An internal match requires the shared repeat
+to be *shorter* than the reads, so unaligned flanks remain on both sides — that is the overhang the
+filter keys on. If the repeat is *longer* than the read, reads drawn from different copies align end
+to end and are geometrically indistinguishable from a genuine dovetail. No overhang-based filter can
+separate those, at any threshold. The measured internal-match fractions fit: 9–21% here against
+25–80% in the responsive ONT runs (§4.4).
+
+**This matters for #34 as much as #31.** Depth normalization strips reads from regions that are
+*over-represented*. If these runs collapse because of dispersed repeats at ordinary depth rather than
+an enriched element, the reads are not over-represented and normalization has nothing to remove.
+Whether these seven are depth-skewed at all is **unmeasured**, and it decides whether #34 helps them.
+
+- [ ] **TODO, cheap and high-value:** compute the depth profile of these seven against their
+      references (`depth_windows.sh` did this for earlier runs). If flat, the benchmark tail contains
+      a third mechanism that neither current fix addresses, and the post must say so.
+
+### 4.6 Impact — **TODO**
 
 This is the section that cannot be written yet, and it is the one that matters most for the post,
 because **mechanism 1 changes default output and therefore changes published numbers**.
@@ -348,9 +416,11 @@ Draft position, to revisit once mechanism 1 lands:
 
 ## 6. Open questions
 
-- [x] **Are the ONT sub-0.5x failures immune to mechanism 2?** No. Tested on two: one recovers most
-      of its error under `-F`, one is untouched. See §4.3. **13 remain untested** and should be run
-      before the post is written.
+- [x] **Are the ONT sub-0.5x failures immune to mechanism 2?** No, and not uniformly. All 25
+      sub-0.5x runs have now been tested: 18 respond to `-F`, 7 are completely inert (§2, §4.5).
+- [ ] **Are the 7 inert *N. gonorrhoeae* runs depth-skewed?** Decides whether #34 helps them or
+      whether the tail holds a third mechanism with no fix in flight. Cheapest open experiment (§4.5).
+- [ ] Does internal-match fraction track depth skew, as §4.4 requires? Needs the same depth profiles.
 - [ ] Should `--max-overhang-ratio` adapt to overlap density rather than being a constant? (§3.6)
 - [ ] Should `-F` ever default on, for some detectable class of input? Current answer: no. (§3.5)
 - [ ] Does the target-depth relationship in §3.4 hold on ONT data, and on skewed input? (§4.4)
@@ -396,8 +466,11 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 - **2026-09-01** — MBH raised the coupling hypothesis now recorded as §4.4: depth enrichment should
   itself produce internal matches, making mechanism 2 partly a symptom of mechanism 1. Reframes what
   the post is about; cannot be settled until #34 lands.
-- **2026-09-01** — remaining 13 ONT sub-0.5x runs submitted, with internal-match fractions measured
-  from the overlap set. **TODO: record results here.**
+- **2026-09-01** — remaining 13 ONT sub-0.5x runs completed, with internal-match fractions measured
+  from the overlap set. All 25 sub-0.5x runs are now tested. Result: 18 respond to `-F`, 7 (all
+  *N. gonorrhoeae*, all ~0.02x) are inert, which is a third failure mode (§4.5). Internal-match
+  fraction predicts response (§4.4, prediction 1). `-F` overshoots truth on 3 of 13 ONT runs, which
+  strengthens §3.5.
 - **2026-09-01** — `-F` tested post-fix on the two most extreme ONT failures. `SRR26465560`
   0.098x -> 0.643x (0.855x at ratio 0.05); `SRR26465526` 0.012x -> 0.013x. This refuted the
   platform split drafted in §2 and forced the rewrite of §2, §4.3 and §6. The run the mechanism-1
