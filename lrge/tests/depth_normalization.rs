@@ -110,6 +110,9 @@ fn two_set_normalization_corrects_a_high_copy_element() {
     assert!(!legacy_log.contains("depth normalization retained"));
     assert!(normalized_log.contains("Depth skew detected"));
     assert!(normalized_log.contains("depth normalization retained"));
+    assert!(normalized_log
+        .lines()
+        .any(|line| line.contains("WARN") && line.contains("Depth skew detected")));
 }
 
 #[test]
@@ -130,6 +133,9 @@ fn all_vs_all_normalization_corrects_a_high_copy_element() {
         "normalized estimate was {normalized}"
     );
     assert!(normalized_log.contains("depth normalization retained"));
+    assert!(normalized_log
+        .lines()
+        .any(|line| line.contains("WARN") && line.contains("Depth skew detected")));
 }
 
 #[test]
@@ -151,5 +157,8 @@ fn a_small_normalized_pool_warns_and_still_estimates() {
 
     assert!(estimate > 0);
     assert!(log.contains("Depth normalization forced"));
+    assert!(log
+        .lines()
+        .any(|line| line.contains("INFO") && line.contains("Depth normalization forced")));
     assert!(log.contains("Normalized read pool is smaller than requested"));
 }

@@ -130,7 +130,11 @@ impl AvaStrategy {
         debug!("Writing subsampled reads to temporary files...");
         let mut selection = selector.write_selected(&[(&out_file, self.num_reads)], None)?;
         if let Some(message) = selector.normalization_message(&selection) {
-            info!("{message}");
+            if self.normalization == Normalization::Auto {
+                warn!("{message}");
+            } else {
+                info!("{message}");
+            }
         }
         if selection.output_records[0] < self.num_reads {
             warn!(

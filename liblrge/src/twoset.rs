@@ -164,7 +164,11 @@ impl TwoSetStrategy {
             None,
         )?;
         if let Some(message) = selector.normalization_message(&selection) {
-            info!("{message}");
+            if self.normalization == Normalization::Auto {
+                warn!("{message}");
+            } else {
+                info!("{message}");
+            }
         }
         if selection.output_records != [self.target_num_reads, self.query_num_reads] {
             warn!(

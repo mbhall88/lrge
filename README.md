@@ -385,8 +385,9 @@ up little of the genome. The resulting estimate may collapse towards the size of
 
 The default `--normalize auto` mode checks minimizer depth before selecting reads. When it detects
 skew, it reduces the chance of retaining reads from high-depth sequence and draws both target and
-query reads from the normalized pool. LRGE reports the skew score and retained read count at INFO
-level when this happens. Inputs without detected skew use the original sampling path unchanged.
+query reads from the normalized pool. LRGE reports the skew score and retained read count at WARN
+level so the depth-skewed input is not overlooked. Inputs without detected skew use the original
+sampling path unchanged.
 
 Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
 disable both detection and normalization. A wide reported interval means the per-read estimates
