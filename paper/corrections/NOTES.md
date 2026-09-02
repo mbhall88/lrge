@@ -609,9 +609,11 @@ the full depth profile in a second pass, taken only when skew fires, would cut t
 about a hundredfold; the roughly 1% of runs that are skewed would pay one extra read of the input.
 Parallelising the profiling pass is an independent second win.
 
-Recommendation recorded here for whoever picks this up: this gates the release ([#37][i37]) rather
-than the merge, because `auto` is the default and a 10x regression should not reach users, while the
-correctness work in [PR #45][pr45] is finished and should not wait on a performance redesign.
+Ticketed 2026-09-02 as [#46][i46] (defer the profile until the detector fires, then parallelise it),
+[#47][i47] (cut the per-minimizer sketch cost) and [#48][i48] (the detection floor, at 500 reads).
+All three are parented on [#34][i34] and block [#36][i36]: the full-benchmark re-run must not start
+while `auto` costs 10.2x on unskewed input, and the floor changes which runs engage, so it has to
+land before engagement is measured. [PR #45][pr45] itself is not held up by any of them.
 
 Raw output under `/scratch/user/uqmhal11/lrge-issue34-benchmark/{seedvar,perf}/`; harness in
 `seedvar.sh` and `perf.sh`.
@@ -657,14 +659,17 @@ Draft position, to revisit once mechanism 1 lands:
       it does not (§4.6).
 - [ ] **How many of the 3,370 two-set runs does the detector engage on?** The 17 runs in §4.6 cannot
       bound this — the sample was chosen for being broken. Needs the detector run across the
-      benchmark, and it gates any statement about which published figures move.
+      benchmark, and it gates any statement about which published figures move. Owned by
+      [#36][i36], which also now asks whether anything separates the runs normalization improves
+      from the already-correct ones it moves.
 - [x] **Should the detection sample have a floor?** Yes. Twelve seeds on `SRR26715166` score
-      12x–22x (sd 2.9) from 64–87 reads, and 2 of 12 fall under the 16x threshold. ~1,000 sampled
-      reads puts the threshold ~2.5 sd out (§4.6 follow-ups). Constant to be fitted by [#36][i36].
-- [ ] **Fix the 10.2x cost on unskewed input before release.** Profiled: 67.8% of the run sits in
-      `DepthSkewDetector::observe`, against ~13% for the whole overlap stage, and the pass is
-      single-threaded. Defer the full depth profile to a second pass taken only when skew fires, and
-      parallelise it (§4.6 follow-ups). Gates [#37][i37], not the merge.
+      12x–22x (sd 2.9) from 64–87 reads, and 2 of 12 fall under the 16x threshold. Floor set at 500
+      reads, which puts the threshold ~1.75 sd out on that run (§4.6 follow-ups). Ticketed as
+      [#48][i48]; constant to be refitted by [#36][i36].
+- [x] **Fix the 10.2x cost on unskewed input.** Ticketed as [#46][i46] (defer the profile until the
+      detector fires, then parallelise it) and [#47][i47] (cut the per-minimizer sketch cost). The
+      detection floor is [#48][i48]. All three block [#36][i36], so the full-benchmark re-run cannot
+      start until the cost is fixed.
 - [ ] Should `--max-overhang-ratio` adapt to overlap density rather than being a constant? (§3.6)
 - [ ] Should `-F` ever default on, for some detectable class of input? Current answer: no. (§3.5)
 - [ ] Does the target-depth relationship in §3.4 hold on ONT data, and on skewed input? (§4.4)
@@ -731,6 +736,11 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 
 ## 8. Running log
 
+- **2026-09-02** — the §4.6 follow-ups ticketed: [#46][i46] (defer depth profiling until the detector
+  fires, then parallelise the pass), [#47][i47] (cut the per-minimizer sketch cost) and [#48][i48]
+  (floor the detection sample at 500 reads). Parented on [#34][i34], all three blocking [#36][i36].
+  [#36][i36] also gained a criterion asking whether anything separates the runs normalization
+  improves from the already-correct ones it moves, which is the question one control could not answer.
 - **2026-09-02** — three follow-ups to the §4.6 benchmark, prompted by MBH. The detection sample is
   too small to give a stable verdict: twelve seeds on `SRR26715166` score 12x–22x (sd 2.9) from
   64–87 reads, and 2 of 12 fall under the 16x threshold, so a read-count floor around 1,000 is
@@ -784,4 +794,7 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 [i39]: https://github.com/mbhall88/lrge/issues/39
 [pr40]: https://github.com/mbhall88/lrge/pull/40
 [pr45]: https://github.com/mbhall88/lrge/pull/45
+[i46]: https://github.com/mbhall88/lrge/issues/46
+[i47]: https://github.com/mbhall88/lrge/issues/47
+[i48]: https://github.com/mbhall88/lrge/issues/48
 [c2]: https://github.com/mbhall88/lrge/issues/29#issuecomment-5478078544
