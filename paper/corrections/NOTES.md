@@ -2,8 +2,8 @@
 
 **Status: working notes, not the post.** This file accumulates everything needed to write a
 technical update for lrge users once both mechanisms behind [#29][i29] are addressed. Mechanism 2 is
-fixed and measured. Mechanism 1 is implemented in [PR #45][pr45] and measured on 17 runs (§4.6), but
-that PR is unmerged and unreleased, and nothing yet bounds how many of the 3,370 benchmark runs its
+fixed and measured. Mechanism 1 is measured on 17 runs (§4.6) and merged to `main` in
+[PR #45][pr45], but it is unreleased, and nothing yet bounds how many of the 3,370 benchmark runs its
 default would change. That gap is the main thing still blocking the post.
 
 Paper: Hall MB, Zhou C, Coin LJM. *Genome size estimation from long read overlaps.* Bioinformatics
@@ -240,11 +240,13 @@ calibration.
 
 ---
 
-## 4. Mechanism 1 — depth skew (implemented in [PR #45][pr45], unmerged)
+## 4. Mechanism 1 — depth skew (merged in [PR #45][pr45], unreleased)
 
 Issue [#29][i29] proper. Ticket chain: [#33][i33] (detect skew, observation only) → [#34][i34] (the
 fix) → [#35][i35] (low-memory fallback) → [#36][i36] (fit constants) → [#37][i37] (release) →
-[#38][i38] (re-derive quantiles). [#32][i32] and [#39][i39] are closed.
+[#38][i38] (re-derive quantiles). [#32][i32], [#39][i39], [#34][i34] and [#35][i35] are closed;
+[#33][i33] landed as part of #34. Open: [#36][i36], [#37][i37], [#38][i38], and the three
+performance tickets [#46][i46], [#47][i47], [#48][i48] that block #36.
 
 ### 4.1 What is wrong
 
@@ -264,9 +266,15 @@ Depth-aware read selection. Each read's depth is estimated as the **median** of 
 counts — a median suppresses reads lying wholly inside a high-depth element while sparing reads that
 merely span one, and spanning reads carry the most genome-size information. Reads are retained with
 probability `min(1, C/depth)`. Target and query reads are drawn from a single normalized pool.
-Normalization and subsampling happen together via weighted reservoir sampling, so the pass count is
-unchanged. `--normalize auto|always|never`, defaulting to `auto`; an unskewed run takes the existing
-path and produces byte-identical output.
+Normalization and subsampling happen together in the pass that already writes the read files, so the
+pass count is unchanged. `--normalize auto|always|never`, defaulting to `auto`; an unskewed run takes
+the existing path and produces byte-identical output.
+
+**Correction, 2026-09-03:** the specification said "weighted reservoir sampling", and #35's ticket
+text inherited the phrase, but what landed is Bernoulli retention at `min(1, C/depth)` followed by a
+*uniform* reservoir over the reads that survive. There is no per-read weight anywhere in the
+implementation. Worth getting right in the post, because the ticket wording sent the first attempt
+at §4.7 down a path the code does not support.
 
 ### 4.3 The two mechanisms overlap on the reported run
 
@@ -613,7 +621,8 @@ Ticketed 2026-09-02 as [#46][i46] (defer the profile until the detector fires, t
 [#47][i47] (cut the per-minimizer sketch cost) and [#48][i48] (the detection floor, at 500 reads).
 All three are parented on [#34][i34] and block [#36][i36]: the full-benchmark re-run must not start
 while `auto` costs 10.2x on unskewed input, and the floor changes which runs engage, so it has to
-land before engagement is measured. [PR #45][pr45] itself is not held up by any of them.
+land before engagement is measured. [PR #45][pr45] itself was not held up by any of them and
+merged on 2026-09-02.
 
 Raw output under `/scratch/user/uqmhal11/lrge-issue34-benchmark/{seedvar,perf}/`; harness in
 `seedvar.sh` and `perf.sh`.
@@ -625,6 +634,46 @@ Raw output under `/scratch/user/uqmhal11/lrge-issue34-benchmark/{seedvar,perf}/`
 - [ ] Re-derive the reported interval ([#38][i38]): every `auto` row here reports a wide IQR, and the
       quantiles were fitted on the old selection.
 - [ ] Depth-profile the 10 PacBio sub-0.5x runs (carried from §6).
+### 4.7 The memory cost of normalizing, and the low-memory path ([#35][i35], merged)
+
+Normalization buffers every read it selects until sampling finishes, so it can write them once. The
+buffer is the *request*, not the input: 15,000 reads at the default two-set settings. On long reads
+that is a few hundred megabytes, and on a large request it is more than a modest machine has. This
+was #35, merged as [PR #49][pr49] on 2026-09-02.
+
+A request whose buffer projects past a cap now selects **read positions** instead of read sequences,
+then reads the input a second time to write them out. Both paths drive one reservoir sampler with
+the same retention probabilities in the same input order, so they draw the same random numbers and
+reach the same reservoir. Same reads, same estimate, by construction rather than by testing. The cap
+is `--max-read-buffer`, 1 GB by default, and accepts `512M` or `1.5G`.
+
+Verified on `SRR26465560` at paper settings: the buffered path, the low-memory path, and the
+pre-change `254e146` binary write **byte-identical** `target.fa` and `query.fa` (md5 `1b318277…` and
+`42fb3d7a…`) and all report 2.98 Mbp. The first two of those also confirm the refactor left the §4.6
+benchmark numbers untouched, which is why it is recorded here and not only in the PR.
+
+The saving, on `-n 60000` over the same input:
+
+| | estimate | selected reads | peak RSS | elapsed |
+|---|---|---|---|---|
+| default cap | 3,115,946 | `8e79b63e…` | 7.69 GiB | 6:44.8 |
+| `--max-read-buffer 100M` | 3,115,946 | `8e79b63e…` | 7.21 GiB | 6:45.1 |
+
+489 MB less resident for 0.25s more wall clock — the extra decompression pass disappears next to the
+overlap stage. The read buffer itself went from about 490 MB to 1.4 MB. Note the 7.2 GiB total
+against a 100 MB cap: the cap covers the read buffer alone, and at `-n 60000` the all-vs-all minimap2
+index dominates everything else.
+
+**Two honest limits, both worth stating in the post if it touches this at all.** The cap gates a
+*projection* computed from the mean read length, and nothing re-checks mid-pass, so an input whose
+longer reads survive normalization in unusual numbers can project under the cap and then buffer over
+it; such a run now reports the overrun rather than pretending. And below roughly 32 bytes per
+selected read there is nothing left to cut, because the positions themselves have to be held.
+
+This is engineering, not estimation. It changes no estimate and moves no published figure. It is
+recorded because it is a precondition for [#36][i36] running the detector across all 3,370 benchmark
+runs without hitting a memory ceiling on the larger ones.
+
 ---
 
 ## 5. What the post needs to say about the paper
@@ -680,10 +729,12 @@ Draft position, to revisit once mechanism 1 lands:
 
 ## 7. Reproduction
 
-Working directories `/scratch/user/uqmhal11/lrge-issue29` (mechanism 2, §3) and
+Working directories `/scratch/user/uqmhal11/lrge-issue29` (mechanism 2, §3),
 `/scratch/user/uqmhal11/lrge-issue34-benchmark` (§4.6; run logs, `/usr/bin/time -v` output and kept
-temp dirs under `runs/<accession>/<mode>/`). **Both are scratch and not backed up.** The durable
-artefacts have been copied here:
+temp dirs under `runs/<accession>/<mode>/`) and `/scratch/user/uqmhal11/lrge-issue35-check` (§4.7;
+`check.sh` runs the pre-change binary, the buffered path and the low-memory path over one accession
+and prints the md5s, `memcheck.sh` is the `-n 60000` memory pair). **All three are scratch and not
+backed up.** The durable artefacts have been copied here:
 
 - [`rerun_estimates.tsv`](./rerun_estimates.tsv) — one row per run: read stats, target bases and
   depth, published lrge estimates, re-run estimates for all three variants, infinite-estimate counts.
@@ -736,6 +787,14 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 
 ## 8. Running log
 
+- **2026-09-03** — [#35][i35] implemented and merged as [PR #49][pr49] (§4.7): a low-memory
+  selection path for requests whose read buffer would not fit, with both paths sharing one sampler so
+  a seed picks the same reads either way. Byte-identical selection against the pre-change `254e146`
+  binary on `SRR26465560`, which also re-confirms the §4.6 benchmark. Two things found on the way:
+  the ticket's "stores a per-read weight" description does not match what #34 landed (there is no
+  per-read weight — see the correction in §4.2), and the first version of the size parser accepted
+  `16777216T` as zero bytes because `checked_shl` only guards the shift width. [PR #45][pr45] itself
+  merged to `main` on 2026-09-02, so mechanism 1 is now on `main` and unreleased.
 - **2026-09-02** — the §4.6 follow-ups ticketed: [#46][i46] (defer depth profiling until the detector
   fires, then parallelise the pass), [#47][i47] (cut the per-minimizer sketch cost) and [#48][i48]
   (floor the detection sample at 500 reads). Parented on [#34][i34], all three blocking [#36][i36].
@@ -794,6 +853,7 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 [i39]: https://github.com/mbhall88/lrge/issues/39
 [pr40]: https://github.com/mbhall88/lrge/pull/40
 [pr45]: https://github.com/mbhall88/lrge/pull/45
+[pr49]: https://github.com/mbhall88/lrge/pull/49
 [i46]: https://github.com/mbhall88/lrge/issues/46
 [i47]: https://github.com/mbhall88/lrge/issues/47
 [i48]: https://github.com/mbhall88/lrge/issues/48
