@@ -543,6 +543,79 @@ exception is `SRR24489322` at 0.550x. Mean absolute error, 0.195, is barely bett
 at 0.222, and the errors now point the same way. `-F` must not be switched on automatically under
 detected skew.
 
+#### Follow-up measurements, 2026-09-02
+
+Three questions MBH raised against the §4.6 results, each answered by a further experiment.
+
+**The detector's sample is too small to give a stable verdict.** `SRR26715166` was re-run under
+twelve seeds. Re-seeding redraws the 1% detection sample, so the spread across seeds is the sampling
+noise the 16x threshold has to survive.
+
+| | |
+|---|---|
+| Sampled reads | 64–87 (mean 77) |
+| Skew score | 12–22, mean 18.0, sd 2.9 |
+| Below the 16x threshold | 2 of 12 seeds (17%) |
+| Estimate when detected | 0.710x–0.795x |
+| Estimate when missed | 0.215x |
+
+The threshold sits 0.7 sd below the mean score, so the verdict is decided by which ~70 reads are
+drawn rather than by the input. The paper seed, 4556, happens to draw one of the unlucky samples.
+A floor on **sampled reads** is the fix. Note the detector already has a floor,
+`MIN_DISTINCT_MINIMIZERS = 128`, but it guards distinct minimizers, and 69 reads of ~9.4 kb clear it
+easily — the noise is in read count, not minimizer count, so this is a new guard rather than a
+retuned one. Since the sd of a sampling statistic falls as 1/sqrt(n), moving from ~77 to ~1,000 reads
+puts the threshold roughly 2.5 sd out. Treat 1,000 as a starting point for [#36][i36] to fit: the sd
+comes from twelve seeds on one run, and a 99.9th percentile only roughly obeys the sqrt(n) scaling.
+The floor binds only on small inputs — `SRR8618952` already samples 1,368 reads and `SRR12247681`
+3,172 — so it costs almost nothing. It also will not fully fix this run: even when detected it
+reaches 0.71x–0.80x rather than the 0.837x of `--normalize always`, because 7,473 reads cannot fill
+the requested 15,000.
+
+**Nothing separates the `SRR12247681` regression from the runs that needed fixing.** Its score of
+104x sits mid-range among the engaging runs, which span 21x to 425x, so raising the threshold above
+it would lose five genuine recoveries (`SRR24489322`, `DRR213976`, `SRR26715165`, `SRR10259778`,
+`SRR26465563`) to save one run five points of error. The regression is also not the visible edge of a
+trend: the eleven recovered runs average 0.962x, so normalization slightly *under*-corrects on
+average, and 1.113x is a lone outlier the other way. One loose thread if more regressions appear —
+normalization enriched this run's target set for longer reads, 40.0 MB of FASTA against 30.9 MB at
+the same read count. What would settle the question is the engagement rate across the 3,370
+benchmark runs, not a mechanism inferred from one control.
+
+**The 10.2x cost is an implementation problem, not an inherent one.** `perf stat` on `SRR8618952`,
+1.00 Gbp:
+
+| | `never` | `auto` |
+|---|---|---|
+| task-clock | 16.9s | 65.2s |
+| instructions | 121G | 345G |
+| cache-misses | 197M (11.9%) | 1,042M (26.6%) |
+| IPC | 2.09 | 1.44 |
+| CPU utilisation | 242% | 113% |
+
+`perf record` on a build with `CARGO_PROFILE_RELEASE_STRIP=false` puts **67.8% of the whole run in
+`DepthSkewDetector::observe`**, plus 5.6% in the `values_u64()` fold inside it. Minimizer hashing is
+2.3% and the entire minimap2 overlap computation — the work lrge exists to do — is about 13%. So the
+detector costs roughly five times the overlap stage, and the cost is the CountMinSketch bookkeeping,
+not the minimizers: `SKETCH_ROWS * SKETCH_WIDTH` is 4 x 2^20 u32, a 16 MB table, and `increment`
+scatters four writes into it per minimizer. At roughly 200M minimizers that predicts ~800M extra
+misses against the 844M measured.
+
+Two separable defects. `count_records` is a sequential `while r.next()` loop, so the pass is
+single-threaded (113% CPU) while the overlap stage uses eight cores. And `depth_sketch.increment`
+runs for every minimizer of every read *before* the detector has decided anything, so on an unskewed
+run every bit of that work is discarded. Building only the 1% detection sketch in the first pass and
+the full depth profile in a second pass, taken only when skew fires, would cut the unskewed case by
+about a hundredfold; the roughly 1% of runs that are skewed would pay one extra read of the input.
+Parallelising the profiling pass is an independent second win.
+
+Recommendation recorded here for whoever picks this up: this gates the release ([#37][i37]) rather
+than the merge, because `auto` is the default and a 10x regression should not reach users, while the
+correctness work in [PR #45][pr45] is finished and should not wait on a performance redesign.
+
+Raw output under `/scratch/user/uqmhal11/lrge-issue34-benchmark/{seedvar,perf}/`; harness in
+`seedvar.sh` and `perf.sh`.
+
 #### Still open
 
 - [ ] Run the detector across the 3,370 two-set runs to find how many engage. Nothing here bounds it.
@@ -585,12 +658,13 @@ Draft position, to revisit once mechanism 1 lands:
 - [ ] **How many of the 3,370 two-set runs does the detector engage on?** The 17 runs in §4.6 cannot
       bound this — the sample was chosen for being broken. Needs the detector run across the
       benchmark, and it gates any statement about which published figures move.
-- [ ] **Should the detection sample have a floor?** `SRR26715166` was missed on 69 sampled reads at
-      1% of a 7,473-read input, and `--normalize always` recovers it to 0.837x (§4.6). That is
-      [#36][i36] territory, but a sampling-size question rather than a threshold question.
-- [ ] **Is a 10.2x wall-clock cost on unskewed input acceptable for a default?** Measured on
-      `SRR8618952` (§4.6). `auto` builds the minimizer profile over every read before it knows whether
-      it needs one.
+- [x] **Should the detection sample have a floor?** Yes. Twelve seeds on `SRR26715166` score
+      12x–22x (sd 2.9) from 64–87 reads, and 2 of 12 fall under the 16x threshold. ~1,000 sampled
+      reads puts the threshold ~2.5 sd out (§4.6 follow-ups). Constant to be fitted by [#36][i36].
+- [ ] **Fix the 10.2x cost on unskewed input before release.** Profiled: 67.8% of the run sits in
+      `DepthSkewDetector::observe`, against ~13% for the whole overlap stage, and the pass is
+      single-threaded. Defer the full depth profile to a second pass taken only when skew fires, and
+      parallelise it (§4.6 follow-ups). Gates [#37][i37], not the merge.
 - [ ] Should `--max-overhang-ratio` adapt to overlap density rather than being a constant? (§3.6)
 - [ ] Should `-F` ever default on, for some detectable class of input? Current answer: no. (§3.5)
 - [ ] Does the target-depth relationship in §3.4 hold on ONT data, and on skewed input? (§4.4)
@@ -635,6 +709,11 @@ artefacts have been copied here:
   failure.
 - `timing.sh` — alternates `never` and `auto` across three repeats on one input so page-cache warmth
   cannot favour either mode.
+- `seedvar.sh` — re-runs one accession under twelve seeds to measure the sampling noise in the skew
+  score, since re-seeding redraws the 1% detection sample.
+- `perf.sh` / `perf_symbols.sh` — `perf stat` for `never` against `auto`, and a symbolised
+  `perf record`. The release profile sets `strip = true`, so the symbolised build needs
+  `CARGO_PROFILE_RELEASE_STRIP=false` as well as `CARGO_PROFILE_RELEASE_DEBUG=true`.
 - `collect.py` / `summarise.py` — build `depth_normalization_estimates.tsv` from the run directories,
   and print the §4.6 comparisons (band crossings, mean error, `-F` benefit before and after
   normalization, control preservation, cost).
@@ -652,6 +731,13 @@ failed; re-running them serially succeeded against unchanged paths. Serialise if
 
 ## 8. Running log
 
+- **2026-09-02** — three follow-ups to the §4.6 benchmark, prompted by MBH. The detection sample is
+  too small to give a stable verdict: twelve seeds on `SRR26715166` score 12x–22x (sd 2.9) from
+  64–87 reads, and 2 of 12 fall under the 16x threshold, so a read-count floor around 1,000 is
+  warranted. The `SRR12247681` regression cannot be separated by threshold and is not a systematic
+  bias, so no code change is proposed. The 10.2x cost is an implementation problem: `perf` puts 67.8%
+  of the run in `DepthSkewDetector::observe` against ~13% for the whole overlap stage, and the pass
+  is single-threaded. Recorded under §4.6.
 - **2026-09-02** — [PR #45][pr45] (mechanism 1) benchmarked at commit `254e146` on all 15 ONT
   sub-0.5x runs plus two controls, 37 cells. Outliers in 0.8x–1.2x go from 0 of 15 to 11 of 15; mean
   absolute relative error 0.835 -> 0.222. All seven inert *N. gonorrhoeae* runs recover, which is the
