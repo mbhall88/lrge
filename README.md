@@ -359,6 +359,13 @@ Arguments:
       --use-min-ref
           Use the smaller Q/T dataset as minimap2 reference (for two-set strategy)
 
+      --max-read-buffer <SIZE>
+          Cap on the memory used to buffer selected reads when normalizing (e.g. 512M, 4G)
+          
+          Above this, lrge buffers read positions and reads the input one extra time. The reads selected for a given seed are the same either way.
+          
+          [default: 1G]
+
   -q, --quiet...
           `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
 
@@ -393,6 +400,14 @@ Use `--normalize always` to normalize regardless of the skew verdict, or `--norm
 disable both detection and normalization. A wide reported interval means the per-read estimates
 disagree. Uneven depth is one possible cause; repeats, sparse overlaps, or too few sampled reads can
 also widen it.
+
+Normalization holds the reads it selects in memory until sampling finishes, which for a large
+request on long reads can be more memory than a machine has. `--max-read-buffer` caps that buffer,
+1 GB by default. A request projected to need more is served by a path that buffers read positions
+instead of read sequences, then reads the input a second time to write them out: less memory, one
+extra pass. Both paths pick the same reads for a given seed, so the cap changes what a run costs
+while the estimate stays the same. The projection comes from the mean read length, so a run can
+still buffer past the cap; when it does, it says so and by how much.
 
 ### Two-set strategy
 

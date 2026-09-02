@@ -3,20 +3,27 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use log::{debug, info, warn};
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 
 use crate::depth_skew::{DepthProfile, DepthSkewDetector, DepthSkewReport};
-use crate::{io, Normalization, Result};
+use crate::{io, Normalization, Result, DEFAULT_MAX_READ_BUFFER};
+
+/// Bytes charged to a buffered read on top of its identifier and sequence, covering the two
+/// heap allocations, the record itself, and a typical read identifier.
+const BUFFERED_RECORD_OVERHEAD: u64 = 128;
 
 pub(crate) struct ReadSelector {
     input: PathBuf,
     num_records: usize,
+    total_bases: usize,
     seed: Option<u64>,
     normalization: Normalization,
     depth_skew: DepthSkewReport,
     depth_profile: Option<DepthProfile>,
+    max_read_buffer: u64,
 }
 
 pub(crate) struct SelectionResult {
@@ -24,6 +31,11 @@ pub(crate) struct SelectionResult {
     pub(crate) output_records: Vec<usize>,
     pub(crate) retained_records: usize,
     pub(crate) normalized: bool,
+    /// Whether the selection fell back to the low-memory path.
+    pub(crate) low_memory: bool,
+    /// Peak bytes the normalized paths held to sample with, counting the reads or positions
+    /// they buffered and nothing else. Zero when normalization did not run.
+    pub(crate) buffer_bytes: u64,
 }
 
 impl ReadSelector {
@@ -33,8 +45,12 @@ impl ReadSelector {
         normalization: Normalization,
     ) -> Result<Self> {
         let input = input.as_ref().to_path_buf();
+        let mut total_bases = 0_usize;
         let (num_records, depth_skew, depth_profile) = if normalization == Normalization::Never {
-            let num_records = io::count_records(&input, |_| Ok(()))?;
+            let num_records = io::count_records(&input, |sequence| {
+                total_bases += sequence.len();
+                Ok(())
+            })?;
             (
                 num_records,
                 DepthSkewReport {
@@ -51,6 +67,7 @@ impl ReadSelector {
                 Normalization::Never => unreachable!("handled above"),
             };
             let num_records = io::count_records(&input, |sequence| {
+                total_bases += sequence.len();
                 detector.observe(sequence);
                 Ok(())
             })?;
@@ -62,11 +79,32 @@ impl ReadSelector {
         Ok(Self {
             input,
             num_records,
+            total_bases,
             seed,
             normalization,
             depth_skew,
             depth_profile,
+            max_read_buffer: DEFAULT_MAX_READ_BUFFER,
         })
+    }
+
+    /// Set the cap on the bytes of selected reads normalization may hold in memory at once.
+    ///
+    /// A request projected to exceed the cap is served by a low-memory path that buffers read
+    /// positions instead of read sequences and pays one extra pass over the input. Both paths
+    /// select the same reads for a given seed.
+    pub(crate) fn max_read_buffer(mut self, bytes: u64) -> Self {
+        self.max_read_buffer = bytes;
+        self
+    }
+
+    /// Bytes the buffered path would hold if every requested read were selected.
+    fn projected_buffer_bytes(&self, capacity: usize) -> u64 {
+        let mean_record_bases = match self.num_records {
+            0 => 0,
+            count => (self.total_bases / count) as u64,
+        };
+        (capacity as u64).saturating_mul(mean_record_bases + BUFFERED_RECORD_OVERHEAD)
     }
 
     pub(crate) fn num_records(&self) -> usize {
@@ -118,7 +156,32 @@ impl ReadSelector {
                 weights.is_none(),
                 "normalization computes its own read weights"
             );
-            return self.write_normalized(outputs);
+            let selection = self.write_normalized(outputs)?;
+            if selection.low_memory {
+                info!(
+                    "Selected reads by position to stay under the {} byte read-buffer cap; this read the input one extra time and held {} bytes",
+                    self.max_read_buffer, selection.buffer_bytes
+                );
+                if selection.buffer_bytes > self.max_read_buffer {
+                    warn!(
+                        "Tracking this many selected reads takes {} bytes even without their sequences, over the {} byte cap; request fewer reads or raise --max-read-buffer",
+                        selection.buffer_bytes, self.max_read_buffer
+                    );
+                }
+            } else if selection.buffer_bytes > self.max_read_buffer {
+                // The cap is applied to a projection from the mean read length, so a run whose
+                // longer reads survive normalization can land here.
+                warn!(
+                    "Buffering the selected reads took {} bytes, over the {} byte cap; lower --max-read-buffer to force the low-memory path",
+                    selection.buffer_bytes, self.max_read_buffer
+                );
+            } else {
+                debug!(
+                    "Buffered the selected reads in {} bytes, under the {} byte cap",
+                    selection.buffer_bytes, self.max_read_buffer
+                );
+            }
+            return Ok(selection);
         }
 
         let num_selected = outputs.iter().map(|(_, count)| count).sum();
@@ -142,12 +205,7 @@ impl ReadSelector {
         io::iter_records(&self.input, |id, seq| {
             for (output_index, selected) in selected_indices.iter_mut().enumerate() {
                 if selected.remove(&index) {
-                    let writer = &mut writers[output_index];
-                    writer.write_all(b">")?;
-                    writer.write_all(id)?;
-                    writer.write_all(b"\n")?;
-                    writer.write_all(seq)?;
-                    writer.write_all(b"\n")?;
+                    write_record(&mut writers[output_index], id, seq)?;
                     lengths[output_index] += seq.len();
                     break;
                 }
@@ -162,6 +220,8 @@ impl ReadSelector {
             output_records: outputs.iter().map(|(_, count)| *count).collect(),
             retained_records: self.num_records,
             normalized: false,
+            low_memory: false,
+            buffer_bytes: 0,
         })
     }
 
@@ -175,85 +235,282 @@ impl ReadSelector {
 
     fn write_normalized(&mut self, outputs: &[(&Path, usize)]) -> Result<SelectionResult> {
         let capacity = outputs.iter().map(|(_, count)| count).sum();
+        let projected = self.projected_buffer_bytes(capacity);
+        debug!(
+            "Buffering {capacity} selected reads projects to about {projected} bytes against a {} byte cap",
+            self.max_read_buffer
+        );
+        if projected > self.max_read_buffer {
+            self.write_normalized_streamed(outputs, capacity)
+        } else {
+            self.write_normalized_buffered(outputs, capacity)
+        }
+    }
+
+    /// Select and buffer the reads in one pass, then write them out.
+    fn write_normalized_buffered(
+        &mut self,
+        outputs: &[(&Path, usize)],
+        capacity: usize,
+    ) -> Result<SelectionResult> {
         let profile = self
             .depth_profile
             .as_mut()
             .expect("normalization requires a depth profile");
-        let mut rng = match self.seed {
-            Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_rng(&mut rand::rng()),
-        };
-        let mut reservoir = Vec::with_capacity(capacity);
-        let mut retained_records = 0_usize;
+        let mut sampler = NormalizedSampler::new(capacity, self.seed);
+        let mut reservoir: Vec<BufferedRecord> = Vec::with_capacity(capacity);
+        let mut buffer_bytes = 0_u64;
+        let mut peak_buffer_bytes = 0_u64;
         let mut input_index = 0_usize;
 
         io::iter_records(&self.input, |id, sequence| {
             let probability = profile.retention_probability(sequence);
-            if probability < 1.0 && !rng.random_bool(probability) {
-                input_index += 1;
-                return Ok(());
-            }
-
-            retained_records += 1;
-            if capacity > 0 {
+            if let Some(slot) = sampler.offer(input_index, probability) {
                 let record = BufferedRecord {
                     input_index,
                     id: id.to_vec(),
                     sequence: sequence.to_vec(),
                 };
-                if reservoir.len() < capacity {
-                    reservoir.push(record);
-                } else {
-                    let slot = rng.random_range(0..retained_records);
-                    if slot < capacity {
+                buffer_bytes += record.buffered_bytes();
+                match slot {
+                    ReservoirSlot::Append => reservoir.push(record),
+                    ReservoirSlot::Replace(slot) => {
+                        buffer_bytes -= reservoir[slot].buffered_bytes();
                         reservoir[slot] = record;
                     }
                 }
+                peak_buffer_bytes = peak_buffer_bytes.max(buffer_bytes);
             }
             input_index += 1;
             Ok(())
         })?;
 
-        reservoir.shuffle(&mut rng);
+        let order = sampler.finish();
+        let mut slots: Vec<Option<BufferedRecord>> = reservoir.into_iter().map(Some).collect();
+        let mut selected: Vec<BufferedRecord> = order
+            .iter()
+            .map(|slot| slots[*slot].take().expect("each slot is taken once"))
+            .collect();
+
         let output_records = allocate_output_counts(
             outputs.iter().map(|(_, count)| *count).collect(),
-            reservoir.len(),
+            selected.len(),
         );
         let mut lengths = vec![0; outputs.len()];
-        let mut offset = 0;
-        for (output_index, ((path, _), count)) in outputs
-            .iter()
-            .zip(output_records.iter().copied())
+        for (output_index, (records, (path, _))) in split_by_output(&mut selected, &output_records)
+            .into_iter()
+            .zip(outputs)
             .enumerate()
         {
-            let end = offset + count;
-            let records = &mut reservoir[offset..end];
             records.sort_unstable_by_key(|record| record.input_index);
             let mut writer = File::create(path).map(BufWriter::new)?;
             for record in records {
-                writer.write_all(b">")?;
-                writer.write_all(&record.id)?;
-                writer.write_all(b"\n")?;
-                writer.write_all(&record.sequence)?;
-                writer.write_all(b"\n")?;
+                write_record(&mut writer, &record.id, &record.sequence)?;
                 lengths[output_index] += record.sequence.len();
             }
-            offset = end;
         }
 
         Ok(SelectionResult {
             lengths,
             output_records,
-            retained_records,
+            retained_records: sampler.retained_records,
             normalized: true,
+            low_memory: false,
+            buffer_bytes: peak_buffer_bytes + vec_bytes::<usize>(capacity),
         })
     }
+
+    /// Select read positions in one pass, then write the reads out in a second.
+    ///
+    /// This holds an input position per selected read rather than the read itself, which is what
+    /// keeps a large request inside the read-buffer cap. It drives the same [`NormalizedSampler`]
+    /// in the same order as the buffered path, so a seed picks the same reads either way.
+    fn write_normalized_streamed(
+        &mut self,
+        outputs: &[(&Path, usize)],
+        capacity: usize,
+    ) -> Result<SelectionResult> {
+        let profile = self
+            .depth_profile
+            .as_mut()
+            .expect("normalization requires a depth profile");
+        let mut sampler = NormalizedSampler::new(capacity, self.seed);
+        let mut input_index = 0_usize;
+
+        io::iter_records(&self.input, |_, sequence| {
+            let probability = profile.retention_probability(sequence);
+            sampler.offer(input_index, probability);
+            input_index += 1;
+            Ok(())
+        })?;
+
+        let order = sampler.finish();
+        let mut selected = sampler.selected_indices(order);
+        let output_records = allocate_output_counts(
+            outputs.iter().map(|(_, count)| *count).collect(),
+            selected.len(),
+        );
+
+        // Assignments are walked in input order during the write pass, matching the order the
+        // buffered path writes each output in.
+        let mut assignments: Vec<(usize, usize)> = Vec::with_capacity(selected.len());
+        for (output_index, block) in split_by_output(&mut selected, &output_records)
+            .into_iter()
+            .enumerate()
+        {
+            assignments.extend(block.iter().map(|input_index| (*input_index, output_index)));
+        }
+        assignments.sort_unstable();
+
+        let buffer_bytes = sampler.slot_bytes()
+            + vec_bytes::<usize>(selected.capacity())
+            + vec_bytes::<(usize, usize)>(assignments.capacity());
+
+        let mut writers = Vec::with_capacity(outputs.len());
+        for (path, _) in outputs {
+            writers.push(File::create(path).map(BufWriter::new)?);
+        }
+
+        let mut lengths = vec![0; outputs.len()];
+        let mut cursor = 0;
+        let mut input_index = 0_usize;
+        io::iter_records(&self.input, |id, sequence| {
+            if let Some((_, output_index)) = assignments
+                .get(cursor)
+                .filter(|(index, _)| *index == input_index)
+                .copied()
+            {
+                write_record(&mut writers[output_index], id, sequence)?;
+                lengths[output_index] += sequence.len();
+                cursor += 1;
+            }
+            input_index += 1;
+            Ok(())
+        })?;
+
+        Ok(SelectionResult {
+            lengths,
+            output_records,
+            retained_records: sampler.retained_records,
+            normalized: true,
+            low_memory: true,
+            buffer_bytes,
+        })
+    }
+}
+
+/// The reservoir decisions shared by both normalized selection paths.
+///
+/// Both paths offer the same records in the same order with the same retention probabilities, so
+/// they draw the same random numbers and end with the same reservoir. That is what lets a seed
+/// mean the same thing whichever path a request lands on.
+struct NormalizedSampler {
+    rng: StdRng,
+    capacity: usize,
+    retained_records: usize,
+    slots: Vec<usize>,
+}
+
+impl NormalizedSampler {
+    fn new(capacity: usize, seed: Option<u64>) -> Self {
+        let rng = match seed {
+            Some(seed) => StdRng::seed_from_u64(seed),
+            None => StdRng::from_rng(&mut rand::rng()),
+        };
+        Self {
+            rng,
+            capacity,
+            retained_records: 0,
+            slots: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Offer the record at `input_index`, which survives normalization with `probability`.
+    ///
+    /// Returns where the record belongs in the reservoir, or `None` if it was dropped.
+    fn offer(&mut self, input_index: usize, probability: f64) -> Option<ReservoirSlot> {
+        if probability < 1.0 && !self.rng.random_bool(probability) {
+            return None;
+        }
+
+        self.retained_records += 1;
+        if self.capacity == 0 {
+            return None;
+        }
+
+        if self.slots.len() < self.capacity {
+            self.slots.push(input_index);
+            return Some(ReservoirSlot::Append);
+        }
+
+        let slot = self.rng.random_range(0..self.retained_records);
+        if slot < self.capacity {
+            self.slots[slot] = input_index;
+            Some(ReservoirSlot::Replace(slot))
+        } else {
+            None
+        }
+    }
+
+    /// Shuffle the reservoir, returning the slots in their final order.
+    fn finish(&mut self) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..self.slots.len()).collect();
+        order.shuffle(&mut self.rng);
+        order
+    }
+
+    /// The input positions of the selected reads, in the order `finish` settled on.
+    fn selected_indices(&self, order: Vec<usize>) -> Vec<usize> {
+        order.into_iter().map(|slot| self.slots[slot]).collect()
+    }
+
+    fn slot_bytes(&self) -> u64 {
+        vec_bytes::<usize>(self.slots.capacity())
+    }
+}
+
+/// Where an offered record belongs in the reservoir.
+enum ReservoirSlot {
+    /// After the records already held, which are still fewer than the reservoir takes.
+    Append,
+    /// In place of the record already at this position.
+    Replace(usize),
+}
+
+fn vec_bytes<T>(capacity: usize) -> u64 {
+    (capacity * std::mem::size_of::<T>()) as u64
+}
+
+/// Split the selected reads into one block per output, in the order the outputs were requested.
+fn split_by_output<'a, T>(selected: &'a mut [T], counts: &[usize]) -> Vec<&'a mut [T]> {
+    let mut remaining = selected;
+    let mut blocks = Vec::with_capacity(counts.len());
+    for count in counts {
+        let (block, rest) = remaining.split_at_mut(*count);
+        blocks.push(block);
+        remaining = rest;
+    }
+    blocks
+}
+
+fn write_record<W: Write>(writer: &mut W, id: &[u8], sequence: &[u8]) -> std::io::Result<()> {
+    writer.write_all(b">")?;
+    writer.write_all(id)?;
+    writer.write_all(b"\n")?;
+    writer.write_all(sequence)?;
+    writer.write_all(b"\n")
 }
 
 struct BufferedRecord {
     input_index: usize,
     id: Vec<u8>,
     sequence: Vec<u8>,
+}
+
+impl BufferedRecord {
+    fn buffered_bytes(&self) -> u64 {
+        (self.id.len() + self.sequence.len()) as u64 + BUFFERED_RECORD_OVERHEAD
+    }
 }
 
 fn allocate_output_counts(mut requested: Vec<usize>, selected: usize) -> Vec<usize> {
@@ -563,6 +820,192 @@ mod tests {
                 .matches('>')
                 .count(),
             result.output_records[0]
+        );
+    }
+
+    fn skewed_input() -> tempfile::NamedTempFile {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        for index in 0..40 {
+            writeln!(
+                input,
+                ">chromosome{index}\n{}",
+                String::from_utf8(pseudo_random_dna(600, index + 1)).unwrap()
+            )
+            .unwrap();
+        }
+        let element = String::from_utf8(pseudo_random_dna(600, 10_000)).unwrap();
+        for index in 0..400 {
+            writeln!(input, ">element{index}\n{element}").unwrap();
+        }
+        input
+    }
+
+    #[test]
+    fn both_paths_select_the_same_reads_for_a_given_seed() {
+        let input = skewed_input();
+        let tempdir = tempfile::tempdir().unwrap();
+        let buffered_target = tempdir.path().join("buffered_target.fa");
+        let buffered_query = tempdir.path().join("buffered_query.fa");
+        let streamed_target = tempdir.path().join("streamed_target.fa");
+        let streamed_query = tempdir.path().join("streamed_query.fa");
+
+        let mut buffered = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+            .unwrap()
+            .max_read_buffer(u64::MAX);
+        let buffered_selection = buffered
+            .write_selected(
+                &[
+                    (buffered_target.as_path(), 20),
+                    (buffered_query.as_path(), 10),
+                ],
+                None,
+            )
+            .unwrap();
+
+        let mut streamed = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+            .unwrap()
+            .max_read_buffer(0);
+        let streamed_selection = streamed
+            .write_selected(
+                &[
+                    (streamed_target.as_path(), 20),
+                    (streamed_query.as_path(), 10),
+                ],
+                None,
+            )
+            .unwrap();
+
+        assert!(!buffered_selection.low_memory);
+        assert!(streamed_selection.low_memory);
+        assert_eq!(
+            buffered_selection.retained_records,
+            streamed_selection.retained_records
+        );
+        assert_eq!(
+            buffered_selection.output_records,
+            streamed_selection.output_records
+        );
+        assert_eq!(buffered_selection.lengths, streamed_selection.lengths);
+        assert_eq!(
+            std::fs::read(buffered_target).unwrap(),
+            std::fs::read(streamed_target).unwrap()
+        );
+        assert_eq!(
+            std::fs::read(buffered_query).unwrap(),
+            std::fs::read(streamed_query).unwrap()
+        );
+    }
+
+    #[test]
+    fn both_paths_agree_when_the_pool_is_smaller_than_the_request() {
+        let input = skewed_input();
+        let tempdir = tempfile::tempdir().unwrap();
+        let buffered_path = tempdir.path().join("buffered.fa");
+        let streamed_path = tempdir.path().join("streamed.fa");
+
+        let mut buffered = ReadSelector::new(input.path(), Some(7), Normalization::Always)
+            .unwrap()
+            .max_read_buffer(u64::MAX);
+        let buffered_selection = buffered
+            .write_selected(&[(buffered_path.as_path(), 400)], None)
+            .unwrap();
+        let mut streamed = ReadSelector::new(input.path(), Some(7), Normalization::Always)
+            .unwrap()
+            .max_read_buffer(0);
+        let streamed_selection = streamed
+            .write_selected(&[(streamed_path.as_path(), 400)], None)
+            .unwrap();
+
+        assert!(buffered_selection.output_records[0] < 400);
+        assert_eq!(
+            buffered_selection.output_records,
+            streamed_selection.output_records
+        );
+        assert_eq!(
+            std::fs::read(buffered_path).unwrap(),
+            std::fs::read(streamed_path).unwrap()
+        );
+    }
+
+    #[test]
+    fn the_low_memory_path_holds_the_read_buffer_within_the_cap() {
+        let input = skewed_input();
+        let tempdir = tempfile::tempdir().unwrap();
+        let buffered_path = tempdir.path().join("buffered.fa");
+        let streamed_path = tempdir.path().join("streamed.fa");
+        // Enough for 30 read indices, nowhere near enough for 30 six-hundred-base reads.
+        let cap = 8 * 1024;
+
+        let mut buffered = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+            .unwrap()
+            .max_read_buffer(u64::MAX);
+        let buffered_selection = buffered
+            .write_selected(&[(buffered_path.as_path(), 30)], None)
+            .unwrap();
+        let mut streamed = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+            .unwrap()
+            .max_read_buffer(cap);
+        let streamed_selection = streamed
+            .write_selected(&[(streamed_path.as_path(), 30)], None)
+            .unwrap();
+
+        assert!(buffered_selection.buffer_bytes > cap);
+        assert!(streamed_selection.low_memory);
+        assert!(
+            streamed_selection.buffer_bytes <= cap,
+            "low-memory path held {} bytes against a {cap} byte cap",
+            streamed_selection.buffer_bytes
+        );
+    }
+
+    #[test]
+    fn a_request_that_fits_the_cap_stays_on_the_buffered_path() {
+        let input = skewed_input();
+        let tempdir = tempfile::tempdir().unwrap();
+        let selected = tempdir.path().join("selected.fa");
+
+        let mut selector = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+            .unwrap()
+            .max_read_buffer(crate::DEFAULT_MAX_READ_BUFFER);
+        let selection = selector
+            .write_selected(&[(selected.as_path(), 30)], None)
+            .unwrap();
+
+        assert!(!selection.low_memory);
+    }
+
+    #[test]
+    fn the_cap_does_not_change_unnormalized_selection() {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        for index in 0..100 {
+            writeln!(
+                input,
+                ">read{index}\n{}",
+                String::from_utf8(pseudo_random_dna(250, index + 1)).unwrap()
+            )
+            .unwrap();
+        }
+        let tempdir = tempfile::tempdir().unwrap();
+        let generous = tempdir.path().join("generous.fa");
+        let stingy = tempdir.path().join("stingy.fa");
+
+        let mut selector = ReadSelector::new(input.path(), Some(42), Normalization::Never)
+            .unwrap()
+            .max_read_buffer(u64::MAX);
+        selector
+            .write_selected(&[(generous.as_path(), 20)], None)
+            .unwrap();
+        let mut selector = ReadSelector::new(input.path(), Some(42), Normalization::Never)
+            .unwrap()
+            .max_read_buffer(0);
+        let selection = selector
+            .write_selected(&[(stingy.as_path(), 20)], None)
+            .unwrap();
+
+        assert!(!selection.low_memory);
+        assert_eq!(
+            std::fs::read(generous).unwrap(),
+            std::fs::read(stingy).unwrap()
         );
     }
 

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 const TARGET_NUM_READS: &str = "10000";
 const QUERY_NUM_READS: &str = "5000";
 const MAX_OVERHANG_RATIO: &str = "0.2";
+const MAX_READ_BUFFER: &str = "1G";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -83,6 +84,13 @@ pub struct Args {
     #[arg(long = "use-min-ref", hide_short_help = true)]
     pub use_min_ref: bool,
 
+    /// Cap on the memory used to buffer selected reads when normalizing (e.g. 512M, 4G)
+    ///
+    /// Above this, lrge buffers read positions and reads the input one extra time. The reads
+    /// selected for a given seed are the same either way.
+    #[arg(long = "max-read-buffer", value_name = "SIZE", default_value = MAX_READ_BUFFER, value_parser = parse_byte_size, hide_short_help = true)]
+    pub max_read_buffer: u64,
+
     /// `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing.
     #[arg(short, long, action = clap::ArgAction::Count, conflicts_with = "verbose")]
     pub quiet: u8,
@@ -126,6 +134,42 @@ fn validate_high_quantile(s: &str) -> Result<f32, String> {
     validate_quantile(s, 0.5, 1.0)
 }
 
+/// A value parser for a memory size, in bytes or with a binary suffix such as `512M` or `4G`
+fn parse_byte_size(s: &str) -> Result<u64, String> {
+    let text = s.trim();
+    let digits = text
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(text.len());
+    let (number, suffix) = text.split_at(digits);
+    let value: u64 = number
+        .parse()
+        .map_err(|_| format!("`{s}` is not a valid size"))?;
+
+    let suffix = suffix.trim_start();
+    let suffix = suffix
+        .strip_suffix("iB")
+        .or_else(|| suffix.strip_suffix("IB"))
+        .or_else(|| suffix.strip_suffix('B'))
+        .or_else(|| suffix.strip_suffix('b'))
+        .unwrap_or(suffix);
+    let shift = match suffix.to_ascii_uppercase().as_str() {
+        "" => 0,
+        "K" => 10,
+        "M" => 20,
+        "G" => 30,
+        "T" => 40,
+        _ => {
+            return Err(format!(
+                "`{s}` has an unknown size suffix; use K, M, G, or T"
+            ))
+        }
+    };
+
+    value
+        .checked_mul(1 << shift)
+        .ok_or_else(|| format!("Size `{s}` is too large"))
+}
+
 /// A value parser for the maximum overhang ratio
 fn validate_overhang_ratio(s: &str) -> Result<f32, String> {
     let value: f32 = s
@@ -164,6 +208,59 @@ mod tests {
         assert!(validate_quantile("abc", 0.0, 0.5).is_err());
         assert!(validate_quantile("0.6", 0.5, 1.0).is_ok());
         assert!(validate_quantile("1.0", 0.5, 1.0).is_err());
+    }
+
+    #[test]
+    fn byte_size_accepts_plain_bytes() {
+        assert_eq!(parse_byte_size("1024").unwrap(), 1024);
+    }
+
+    #[test]
+    fn byte_size_accepts_binary_suffixes() {
+        for (text, expected) in [
+            ("2K", 2 << 10),
+            ("2k", 2 << 10),
+            ("2KB", 2 << 10),
+            ("2KiB", 2 << 10),
+            ("512M", 512 << 20),
+            ("4G", 4u64 << 30),
+            ("1T", 1u64 << 40),
+        ] {
+            assert_eq!(parse_byte_size(text).unwrap(), expected, "parsing {text}");
+        }
+    }
+
+    #[test]
+    fn byte_size_allows_a_space_before_the_suffix() {
+        assert_eq!(parse_byte_size("4 G").unwrap(), 4u64 << 30);
+    }
+
+    #[test]
+    fn byte_size_rejects_a_value_that_overflows_its_suffix() {
+        // a shift that fits in u64 can still shift every bit of the value out
+        assert!(parse_byte_size("16777216T").is_err());
+        assert!(parse_byte_size("18446744073709551615G").is_err());
+    }
+
+    #[test]
+    fn byte_size_rejects_nonsense() {
+        for text in ["", "G", "-1", "1.5G", "4X", "four"] {
+            assert!(parse_byte_size(text).is_err(), "accepted {text}");
+        }
+    }
+
+    #[test]
+    fn cli_defaults_the_read_buffer_cap() {
+        let opts = Args::try_parse_from([BIN, "Cargo.toml"]).unwrap();
+
+        assert_eq!(opts.max_read_buffer, liblrge::DEFAULT_MAX_READ_BUFFER);
+    }
+
+    #[test]
+    fn cli_accepts_a_read_buffer_cap() {
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "--max-read-buffer", "512M"]).unwrap();
+
+        assert_eq!(opts.max_read_buffer, 512 << 20);
     }
 
     #[test]

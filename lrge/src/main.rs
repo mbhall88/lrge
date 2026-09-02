@@ -61,7 +61,8 @@ fn main() -> Result<()> {
             .threads(args.threads)
             .tmpdir(tmpdir.path())
             .seed(args.seed)
-            .normalization(args.normalize);
+            .normalization(args.normalize)
+            .max_read_buffer(args.max_read_buffer);
 
         Box::new(builder.build(args.input))
     } else if let (Some(target_num_reads), Some(query_num_reads)) =
@@ -79,7 +80,8 @@ fn main() -> Result<()> {
             .threads(args.threads)
             .tmpdir(tmpdir.path())
             .seed(args.seed)
-            .normalization(args.normalize);
+            .normalization(args.normalize)
+            .max_read_buffer(args.max_read_buffer);
 
         Box::new(builder.build(args.input))
     } else {
