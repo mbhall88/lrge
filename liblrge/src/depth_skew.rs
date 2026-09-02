@@ -17,7 +17,9 @@ const MIN_DISTINCT_MINIMIZERS: usize = 128;
 // Express the 99.9th percentile as 999 parts per thousand to avoid float rounding.
 const HIGH_QUANTILE_PER_MILLE: usize = 999;
 const SKEW_THRESHOLD: f64 = 16.0;
+const RETENTION_TARGET_MULTIPLIER: u32 = 2;
 
+#[derive(Clone)]
 pub(crate) struct DepthSkewReport {
     /// Ratio of the 99.9th percentile minimizer count to the median count.
     pub(crate) score: Option<f64>,
@@ -51,25 +53,35 @@ impl fmt::Display for DepthSkewReport {
 
 pub(crate) struct DepthSkewDetector {
     rng: StdRng,
-    #[cfg(test)]
     sample_all: bool,
-    sketch: CountMinSketch,
+    // Full-input counts give the normalizer enough resolution at ordinary chromosome depth.
+    depth_sketch: CountMinSketch,
+    // The skew verdict keeps the sampled counting path introduced by the detector.
+    detection_sketch: Option<CountMinSketch>,
     distinct: DistinctSample,
     positions: Vec<u32>,
     sampled_records: usize,
 }
 
 impl DepthSkewDetector {
-    pub(crate) fn new(seed: Option<u64>) -> Self {
+    pub(crate) fn detecting(seed: Option<u64>) -> Self {
+        Self::new(seed, false, true)
+    }
+
+    pub(crate) fn profiling(seed: Option<u64>) -> Self {
+        Self::new(seed, true, false)
+    }
+
+    fn new(seed: Option<u64>, sample_all: bool, detect_skew: bool) -> Self {
         let rng = match seed {
             Some(seed) => StdRng::seed_from_u64(seed),
             None => StdRng::from_rng(&mut rand::rng()),
         };
         Self {
             rng,
-            #[cfg(test)]
-            sample_all: false,
-            sketch: CountMinSketch::new(),
+            sample_all,
+            depth_sketch: CountMinSketch::new(),
+            detection_sketch: detect_skew.then(CountMinSketch::new),
             distinct: DistinctSample::new(DISTINCT_SAMPLE_SIZE),
             positions: Vec::new(),
             sampled_records: 0,
@@ -77,15 +89,11 @@ impl DepthSkewDetector {
     }
 
     pub(crate) fn observe(&mut self, sequence: &[u8]) {
-        #[cfg(test)]
         let selected = self.sample_all || self.rng.random_ratio(1, READ_SAMPLE_DENOMINATOR);
-        #[cfg(not(test))]
-        let selected = self.rng.random_ratio(1, READ_SAMPLE_DENOMINATOR);
-        if !selected {
-            return;
+        if selected {
+            self.sampled_records += 1;
         }
 
-        self.sampled_records += 1;
         for segment in sequence
             .split(|base| !matches!(base, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
         {
@@ -97,48 +105,126 @@ impl DepthSkewDetector {
             let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
                 .run(AsciiSeq(segment), &mut self.positions);
             for value in minimizers.values_u64() {
-                self.sketch.increment(value);
-                self.distinct.observe(value);
+                self.depth_sketch.increment(value);
+                if selected {
+                    if let Some(sketch) = &mut self.detection_sketch {
+                        sketch.increment(value);
+                    }
+                    self.distinct.observe(value);
+                }
             }
         }
     }
 
-    pub(crate) fn finish(self) -> DepthSkewReport {
+    pub(crate) fn finish(self) -> DepthProfile {
         let sampled_records = self.sampled_records;
-        let mut counts: Vec<u32> = self
-            .distinct
-            .into_keys()
-            .map(|value| self.sketch.estimate(value))
-            .collect();
-
-        if counts.len() < MIN_DISTINCT_MINIMIZERS {
-            return DepthSkewReport {
+        let report = match &self.detection_sketch {
+            Some(sketch) => depth_skew_report(sketch, &self.distinct.keys, sampled_records),
+            None => DepthSkewReport {
                 score: None,
                 skewed: false,
-                sampled_records,
-            };
-        }
-
+                sampled_records: 0,
+            },
+        };
+        let mut counts: Vec<u32> = self
+            .distinct
+            .keys
+            .iter()
+            .map(|value| self.depth_sketch.estimate(*value))
+            .collect();
         counts.sort_unstable();
-        let median = counts[(counts.len() - 1) / 2];
-        let high_index = (counts.len() * HIGH_QUANTILE_PER_MILLE)
-            .div_ceil(1000)
-            .saturating_sub(1);
-        let high = counts[high_index];
-        let score = high as f64 / median.max(1) as f64;
+        let median = counts
+            .get((counts.len().saturating_sub(1)) / 2)
+            .copied()
+            .unwrap_or(1)
+            .max(1);
 
-        DepthSkewReport {
-            score: Some(score),
-            skewed: score >= SKEW_THRESHOLD,
-            sampled_records,
+        DepthProfile {
+            report,
+            sketch: self.depth_sketch,
+            median_count: median,
+            positions: self.positions,
+            counts,
         }
     }
 
     #[cfg(test)]
     fn sampling_all() -> Self {
-        let mut detector = Self::new(Some(0));
+        let mut detector = Self::detecting(Some(0));
         detector.sample_all = true;
         detector
+    }
+}
+
+fn depth_skew_report(
+    sketch: &CountMinSketch,
+    minimizers: &HashSet<u64>,
+    sampled_records: usize,
+) -> DepthSkewReport {
+    let mut counts: Vec<u32> = minimizers
+        .iter()
+        .map(|value| sketch.estimate(*value))
+        .collect();
+    if counts.len() < MIN_DISTINCT_MINIMIZERS {
+        return DepthSkewReport {
+            score: None,
+            skewed: false,
+            sampled_records,
+        };
+    }
+
+    counts.sort_unstable();
+    let median = counts[(counts.len() - 1) / 2].max(1);
+    let high_index = (counts.len() * HIGH_QUANTILE_PER_MILLE)
+        .div_ceil(1000)
+        .saturating_sub(1);
+    let score = counts[high_index] as f64 / median as f64;
+    DepthSkewReport {
+        score: Some(score),
+        skewed: score >= SKEW_THRESHOLD,
+        sampled_records,
+    }
+}
+
+pub(crate) struct DepthProfile {
+    pub(crate) report: DepthSkewReport,
+    sketch: CountMinSketch,
+    median_count: u32,
+    positions: Vec<u32>,
+    counts: Vec<u32>,
+}
+
+impl DepthProfile {
+    pub(crate) fn retention_probability(&mut self, sequence: &[u8]) -> f64 {
+        self.counts.clear();
+        for segment in sequence
+            .split(|base| !matches!(base, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
+        {
+            if segment.len() < KMER_LENGTH + WINDOW_WIDTH - 1 {
+                continue;
+            }
+
+            self.positions.clear();
+            let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
+                .run(AsciiSeq(segment), &mut self.positions);
+            self.counts.extend(
+                minimizers
+                    .values_u64()
+                    .map(|value| self.sketch.estimate(value)),
+            );
+        }
+
+        if self.counts.is_empty() {
+            return 1.0;
+        }
+
+        let middle = (self.counts.len() - 1) / 2;
+        let (_, read_depth, _) = self.counts.select_nth_unstable(middle);
+        let read_depth = (*read_depth).max(1);
+        let target = self
+            .median_count
+            .saturating_mul(RETENTION_TARGET_MULTIPLIER);
+        (target as f64 / read_depth as f64).min(1.0)
     }
 }
 
@@ -210,10 +296,6 @@ impl DistinctSample {
             self.keys.insert(value);
         }
     }
-
-    fn into_keys(self) -> impl Iterator<Item = u64> {
-        self.keys.into_iter()
-    }
 }
 
 #[cfg(test)]
@@ -241,7 +323,7 @@ mod tests {
         for _ in 0..40 {
             even.observe(&chromosome);
         }
-        let even = even.finish();
+        let even = even.finish().report;
 
         let mut skewed = DepthSkewDetector::sampling_all();
         for _ in 0..40 {
@@ -250,7 +332,7 @@ mod tests {
         for _ in 0..800 {
             skewed.observe(&plasmid);
         }
-        let skewed = skewed.finish();
+        let skewed = skewed.finish().report;
 
         assert!(!even.skewed, "even-coverage score was {:?}", even.score);
         assert!(skewed.skewed, "skewed score was {:?}", skewed.score);

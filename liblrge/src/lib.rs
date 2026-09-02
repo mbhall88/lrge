@@ -150,6 +150,33 @@ use std::str::FromStr;
 /// A type alias for `Result` with [`LrgeError`][crate::error::LrgeError] as the error type.
 pub type Result<T> = std::result::Result<T, error::LrgeError>;
 
+/// Controls whether read-depth normalization is applied before estimation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Normalization {
+    /// Detect depth skew and normalize only when skew is present.
+    #[default]
+    Auto,
+    /// Normalize every input without consulting the skew verdict.
+    Always,
+    /// Disable depth-skew detection and normalization.
+    Never,
+}
+
+impl FromStr for Normalization {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "always" => Ok(Self::Always),
+            "never" => Ok(Self::Never),
+            _ => Err(format!(
+                "invalid normalization mode '{value}'; expected auto, always, or never"
+            )),
+        }
+    }
+}
+
 /// The sequencing platform used to generate the reads.
 ///
 /// # Examples

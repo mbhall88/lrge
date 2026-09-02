@@ -55,7 +55,7 @@ use crate::error::LrgeError;
 use crate::estimate::per_read_estimate;
 use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
-use crate::{io, read_selection::ReadSelector, Estimate, Platform};
+use crate::{io, read_selection::ReadSelector, Estimate, Normalization, Platform};
 
 /// The default number of reads to use in the all-vs-all strategy.
 pub const DEFAULT_AVA_NUM_READS: usize = 25_000;
@@ -86,6 +86,8 @@ pub struct AvaStrategy {
     seed: Option<u64>,
     /// Sequencing platform of the reads.
     platform: Platform,
+    /// Controls depth-aware read normalization.
+    normalization: Normalization,
 }
 
 impl AvaStrategy {
@@ -106,10 +108,8 @@ impl AvaStrategy {
     /// Subsample the reads in the input file to `num_reads`.
     fn subsample_reads(&mut self) -> crate::Result<(PathBuf, usize)> {
         debug!("Counting records in input file...");
-        let selector = ReadSelector::new(&self.input, self.seed)?;
-        if selector.depth_skew().skewed {
-            warn!("{}", selector.depth_skew());
-        } else {
+        let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?;
+        if self.normalization == Normalization::Auto && !selector.depth_skew().skewed {
             debug!("{}", selector.depth_skew());
         }
         let n_fq_reads = selector.num_records();
@@ -128,8 +128,28 @@ impl AvaStrategy {
         let out_file = self.tmpdir.join("reads.fa");
 
         debug!("Writing subsampled reads to temporary files...");
-        let mut lengths = selector.write_selected(&[(&out_file, self.num_reads)], None)?;
-        let sum_len = lengths.pop().expect("one output was requested");
+        let mut selection = selector.write_selected(&[(&out_file, self.num_reads)], None)?;
+        if let Some(message) = selector.normalization_message(&selection) {
+            if self.normalization == Normalization::Auto {
+                warn!("{message}");
+            } else {
+                info!("{message}");
+            }
+        }
+        if selection.output_records[0] < self.num_reads {
+            warn!(
+                "Normalized read pool is smaller than requested ({} < {}); using {} reads",
+                selection.output_records[0], self.num_reads, selection.output_records[0]
+            );
+            self.num_reads = selection.output_records[0];
+        }
+        if self.num_reads < 2 {
+            return Err(LrgeError::TooFewReadsError(format!(
+                "At least two reads are required; found {}",
+                self.num_reads
+            )));
+        }
+        let sum_len = selection.lengths.pop().expect("one output was requested");
 
         self.num_bases = sum_len;
 

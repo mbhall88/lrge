@@ -60,7 +60,8 @@ fn main() -> Result<()> {
             .remove_internal(args.filter_contained, args.max_overhang_ratio)
             .threads(args.threads)
             .tmpdir(tmpdir.path())
-            .seed(args.seed);
+            .seed(args.seed)
+            .normalization(args.normalize);
 
         Box::new(builder.build(args.input))
     } else if let (Some(target_num_reads), Some(query_num_reads)) =
@@ -77,7 +78,8 @@ fn main() -> Result<()> {
             .use_min_ref(args.use_min_ref)
             .threads(args.threads)
             .tmpdir(tmpdir.path())
-            .seed(args.seed);
+            .seed(args.seed)
+            .normalization(args.normalize);
 
         Box::new(builder.build(args.input))
     } else {
