@@ -360,7 +360,7 @@ Arguments:
           Use the smaller Q/T dataset as minimap2 reference (for two-set strategy)
 
       --max-read-buffer <SIZE>
-          Cap on the memory used to buffer selected reads when normalizing (e.g. 512M, 4G)
+          Cap on the memory used to buffer selected reads when normalizing (e.g. 512M, 1.5G)
           
           Above this, lrge buffers read positions and reads the input one extra time. The reads selected for a given seed are the same either way.
           

@@ -84,7 +84,7 @@ pub struct Args {
     #[arg(long = "use-min-ref", hide_short_help = true)]
     pub use_min_ref: bool,
 
-    /// Cap on the memory used to buffer selected reads when normalizing (e.g. 512M, 4G)
+    /// Cap on the memory used to buffer selected reads when normalizing (e.g. 512M, 1.5G)
     ///
     /// Above this, lrge buffers read positions and reads the input one extra time. The reads
     /// selected for a given seed are the same either way.
@@ -134,17 +134,52 @@ fn validate_high_quantile(s: &str) -> Result<f32, String> {
     validate_quantile(s, 0.5, 1.0)
 }
 
-/// A value parser for a memory size, in bytes or with a binary suffix such as `512M` or `4G`
+/// A value parser for a memory size, in bytes or with a binary suffix such as `512M` or `1.5G`
+///
+/// A fractional size is scaled by its suffix and truncated to whole bytes, so `1.5G` is
+/// 1610612736 and `0.5K` is 512.
 fn parse_byte_size(s: &str) -> Result<u64, String> {
     let text = s.trim();
-    let digits = text
-        .find(|c: char| !c.is_ascii_digit())
+    let split = text
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
         .unwrap_or(text.len());
-    let (number, suffix) = text.split_at(digits);
-    let value: u64 = number
-        .parse()
-        .map_err(|_| format!("`{s}` is not a valid size"))?;
+    let (number, suffix) = text.split_at(split);
+    let invalid = || format!("`{s}` is not a valid size");
+    let too_large = || format!("Size `{s}` is too large");
 
+    if number.is_empty() {
+        return Err(invalid());
+    }
+    let multiplier = 1_u128
+        << parse_size_suffix(suffix)
+            .ok_or_else(|| format!("`{s}` has an unknown size suffix; use K, M, G, or T"))?;
+
+    let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
+    if whole.is_empty() && fraction.is_empty() {
+        return Err(invalid());
+    }
+
+    let whole: u128 = match whole {
+        "" => 0,
+        digits => digits.parse().map_err(|_| too_large())?,
+    };
+    let mut bytes = whole.checked_mul(multiplier).ok_or_else(too_large)?;
+
+    if !fraction.is_empty() {
+        // Scale the fraction with integers so a size like 1.5G stays exact.
+        let digits: u128 = fraction.parse().map_err(|_| invalid())?;
+        let divisor = 10_u128
+            .checked_pow(u32::try_from(fraction.len()).map_err(|_| invalid())?)
+            .ok_or_else(invalid)?;
+        let scaled = digits.checked_mul(multiplier).ok_or_else(too_large)? / divisor;
+        bytes = bytes.checked_add(scaled).ok_or_else(too_large)?;
+    }
+
+    u64::try_from(bytes).map_err(|_| too_large())
+}
+
+/// The power of two a size suffix stands for, ignoring an optional `B`, `iB`, and case
+fn parse_size_suffix(suffix: &str) -> Option<u32> {
     let suffix = suffix.trim_start();
     let suffix = suffix
         .strip_suffix("iB")
@@ -152,22 +187,14 @@ fn parse_byte_size(s: &str) -> Result<u64, String> {
         .or_else(|| suffix.strip_suffix('B'))
         .or_else(|| suffix.strip_suffix('b'))
         .unwrap_or(suffix);
-    let shift = match suffix.to_ascii_uppercase().as_str() {
-        "" => 0,
-        "K" => 10,
-        "M" => 20,
-        "G" => 30,
-        "T" => 40,
-        _ => {
-            return Err(format!(
-                "`{s}` has an unknown size suffix; use K, M, G, or T"
-            ))
-        }
-    };
-
-    value
-        .checked_mul(1 << shift)
-        .ok_or_else(|| format!("Size `{s}` is too large"))
+    match suffix.to_ascii_uppercase().as_str() {
+        "" => Some(0),
+        "K" => Some(10),
+        "M" => Some(20),
+        "G" => Some(30),
+        "T" => Some(40),
+        _ => None,
+    }
 }
 
 /// A value parser for the maximum overhang ratio
@@ -236,6 +263,25 @@ mod tests {
     }
 
     #[test]
+    fn byte_size_accepts_fractional_sizes() {
+        for (text, expected) in [
+            ("1.5G", 1_610_612_736),
+            ("0.5K", 512),
+            (".5K", 512),
+            ("1.25G", 1_342_177_280),
+            ("2.5MiB", 2_621_440),
+            ("1.0G", 1 << 30),
+        ] {
+            assert_eq!(parse_byte_size(text).unwrap(), expected, "parsing {text}");
+        }
+    }
+
+    #[test]
+    fn byte_size_truncates_a_fraction_of_a_byte() {
+        assert_eq!(parse_byte_size("1.5").unwrap(), 1);
+    }
+
+    #[test]
     fn byte_size_rejects_a_value_that_overflows_its_suffix() {
         // a shift that fits in u64 can still shift every bit of the value out
         assert!(parse_byte_size("16777216T").is_err());
@@ -244,7 +290,7 @@ mod tests {
 
     #[test]
     fn byte_size_rejects_nonsense() {
-        for text in ["", "G", "-1", "1.5G", "4X", "four"] {
+        for text in ["", "G", "-1", ".", "1.2.3", "4X", "four", "1.5X"] {
             assert!(parse_byte_size(text).is_err(), "accepted {text}");
         }
     }
