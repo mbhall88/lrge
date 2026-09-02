@@ -162,3 +162,53 @@ fn a_small_normalized_pool_warns_and_still_estimates() {
         .any(|line| line.contains("INFO") && line.contains("Depth normalization forced")));
     assert!(log.contains("Normalized read pool is smaller than requested"));
 }
+
+#[test]
+fn the_low_memory_path_reproduces_the_buffered_estimate() {
+    let input = skewed_reads();
+    let arguments = [
+        "-T",
+        "200",
+        "-Q",
+        "100",
+        "--seed",
+        "42",
+        "--normalize",
+        "auto",
+    ];
+    let (buffered, buffered_log) = run(&input, &arguments);
+    let mut low_memory_arguments = arguments.to_vec();
+    low_memory_arguments.extend(["--max-read-buffer", "1"]);
+    let (low_memory, low_memory_log) = run(&input, &low_memory_arguments);
+
+    assert_eq!(
+        buffered, low_memory,
+        "buffered estimate {buffered} differs from low-memory estimate {low_memory}"
+    );
+    assert!(!buffered_log.contains("Selected reads by position"));
+    assert!(low_memory_log.contains("Selected reads by position"));
+    assert!(low_memory_log.contains("depth normalization retained"));
+}
+
+#[test]
+fn a_generous_budget_keeps_the_buffered_path() {
+    let input = skewed_reads();
+    let (estimate, log) = run(
+        &input,
+        &[
+            "-T",
+            "200",
+            "-Q",
+            "100",
+            "--seed",
+            "42",
+            "--normalize",
+            "auto",
+            "--max-read-buffer",
+            "4G",
+        ],
+    );
+
+    assert!(estimate > 0);
+    assert!(!log.contains("Selected reads by position"));
+}

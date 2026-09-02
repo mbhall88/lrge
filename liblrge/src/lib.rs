@@ -139,6 +139,20 @@ pub mod twoset;
 /// treated as an internal match. Shared by both strategies.
 pub const DEFAULT_MAX_OVERHANG_RATIO: f32 = 0.2;
 
+/// The default cap on the bytes of selected reads that depth normalization holds in memory.
+///
+/// Normalization buffers the reads it selects so it can write them once sampling is done. A
+/// request large enough to project past this cap is served instead by a low-memory path that
+/// buffers read positions and re-reads the input, trading one extra pass for a bounded buffer.
+/// The two paths select the same reads for a given seed, so the cap governs how much memory a
+/// run takes while the estimate stays the same.
+///
+/// The cap covers the read buffer alone: the depth profile, the minimap2 index, and the overlap
+/// stage are all outside it. It is also applied to a projection made from the mean read length,
+/// so an input whose long reads survive normalization in unusual numbers can still buffer past
+/// it. Such a run says by how much once it is done.
+pub const DEFAULT_MAX_READ_BUFFER: u64 = 1 << 30;
+
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 

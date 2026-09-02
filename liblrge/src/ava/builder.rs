@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use super::{AvaStrategy, DEFAULT_AVA_NUM_READS};
-use crate::DEFAULT_MAX_OVERHANG_RATIO;
 use crate::{Normalization, Platform};
+use crate::{DEFAULT_MAX_OVERHANG_RATIO, DEFAULT_MAX_READ_BUFFER};
 
 /// A builder for [`AvaStrategy`].
 pub struct Builder {
@@ -15,6 +15,7 @@ pub struct Builder {
     seed: Option<u64>,
     platform: Platform,
     normalization: Normalization,
+    max_read_buffer: u64,
 }
 
 impl Default for Builder {
@@ -30,6 +31,7 @@ impl Default for Builder {
             seed: None,
             platform: Platform::default(),
             normalization: Normalization::default(),
+            max_read_buffer: DEFAULT_MAX_READ_BUFFER,
         }
     }
 }
@@ -139,6 +141,25 @@ impl Builder {
         self
     }
 
+    /// Set the cap on the bytes of selected reads that depth normalization may hold in memory
+    /// at once. By default, this is [`DEFAULT_MAX_READ_BUFFER`].
+    ///
+    /// A request projected to exceed the cap falls back to a low-memory path that pays one extra
+    /// pass over the input. Both paths select the same reads for a given seed, so the cap governs
+    /// how much memory a run takes while the estimate stays the same.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use liblrge::ava::Builder;
+    ///
+    /// let builder = Builder::new().max_read_buffer(4 << 30);
+    /// ```
+    pub fn max_read_buffer(mut self, bytes: u64) -> Self {
+        self.max_read_buffer = bytes;
+        self
+    }
+
     /// Build the [`AvaStrategy`], using the reads from the given `input` file.
     ///
     /// # Examples
@@ -161,6 +182,7 @@ impl Builder {
             seed: self.seed,
             platform: self.platform,
             normalization: self.normalization,
+            max_read_buffer: self.max_read_buffer,
         }
     }
 }

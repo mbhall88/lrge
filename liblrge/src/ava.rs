@@ -88,6 +88,8 @@ pub struct AvaStrategy {
     platform: Platform,
     /// Controls depth-aware read normalization.
     normalization: Normalization,
+    /// Cap on the bytes of selected reads normalization may buffer.
+    max_read_buffer: u64,
 }
 
 impl AvaStrategy {
@@ -108,7 +110,8 @@ impl AvaStrategy {
     /// Subsample the reads in the input file to `num_reads`.
     fn subsample_reads(&mut self) -> crate::Result<(PathBuf, usize)> {
         debug!("Counting records in input file...");
-        let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?;
+        let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?
+            .max_read_buffer(self.max_read_buffer);
         if self.normalization == Normalization::Auto && !selector.depth_skew().skewed {
             debug!("{}", selector.depth_skew());
         }

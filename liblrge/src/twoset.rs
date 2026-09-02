@@ -102,6 +102,8 @@ pub struct TwoSetStrategy {
     platform: Platform,
     /// Controls depth-aware read normalization.
     normalization: Normalization,
+    /// Cap on the bytes of selected reads normalization may buffer.
+    max_read_buffer: u64,
 }
 
 impl TwoSetStrategy {
@@ -126,7 +128,8 @@ impl TwoSetStrategy {
 
     fn split_fastq(&mut self) -> crate::Result<(PathBuf, PathBuf, f32)> {
         debug!("Counting records in input file...");
-        let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?;
+        let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?
+            .max_read_buffer(self.max_read_buffer);
         if self.normalization == Normalization::Auto && !selector.depth_skew().skewed {
             debug!("{}", selector.depth_skew());
         }
