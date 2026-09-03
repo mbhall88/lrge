@@ -212,3 +212,31 @@ fn a_generous_budget_keeps_the_buffered_path() {
     assert!(estimate > 0);
     assert!(!log.contains("Selected reads by position"));
 }
+
+#[test]
+fn the_estimate_does_not_depend_on_the_thread_count() {
+    let input = skewed_reads();
+    let arguments = [
+        "-T",
+        "200",
+        "-Q",
+        "100",
+        "--seed",
+        "42",
+        "--normalize",
+        "auto",
+    ];
+    let mut single = arguments.to_vec();
+    single.extend(["-t", "1"]);
+    let mut many = arguments.to_vec();
+    many.extend(["-t", "4"]);
+
+    let (single_estimate, single_log) = run(&input, &single);
+    let (many_estimate, _) = run(&input, &many);
+
+    assert!(single_log.contains("Depth skew detected"));
+    assert_eq!(
+        single_estimate, many_estimate,
+        "one thread estimated {single_estimate}, four estimated {many_estimate}"
+    );
+}

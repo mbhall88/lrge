@@ -1,9 +1,15 @@
 use std::collections::{BinaryHeap, HashSet};
 use std::fmt;
+use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 
+use crossbeam_channel as channel;
+use log::debug;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use simd_minimizers::packed_seq::AsciiSeq;
+
+use crate::io;
 
 const KMER_LENGTH: usize = 15;
 const WINDOW_WIDTH: usize = 9;
@@ -18,6 +24,9 @@ const MIN_DISTINCT_MINIMIZERS: usize = 128;
 const HIGH_QUANTILE_PER_MILLE: usize = 999;
 const SKEW_THRESHOLD: f64 = 16.0;
 const RETENTION_TARGET_MULTIPLIER: u32 = 2;
+// Bases of sequence a profiling batch gathers before it is handed to a worker. Batching keeps the
+// channel out of the way of the sketch work, which is what the profiling pass is really doing.
+const PROFILE_BATCH_BASES: usize = 1 << 20;
 
 #[derive(Clone)]
 pub(crate) struct DepthSkewReport {
@@ -25,6 +34,17 @@ pub(crate) struct DepthSkewReport {
     pub(crate) score: Option<f64>,
     pub(crate) skewed: bool,
     pub(crate) sampled_records: usize,
+}
+
+impl DepthSkewReport {
+    /// The report for a run that never asked whether the input is skewed.
+    pub(crate) fn not_assessed() -> Self {
+        Self {
+            score: None,
+            skewed: false,
+            sampled_records: 0,
+        }
+    }
 }
 
 impl fmt::Display for DepthSkewReport {
@@ -51,108 +71,220 @@ impl fmt::Display for DepthSkewReport {
     }
 }
 
+/// Decides whether an input is depth skewed, from a small sample of its reads.
+///
+/// This rides along with the pass that counts the records, so it is the only depth work an
+/// unskewed run pays for. It draws minimizers from roughly one read in
+/// [`READ_SAMPLE_DENOMINATOR`] and skips the rest entirely: the reads it does not sample cost it
+/// nothing beyond one random number.
+///
+/// The sample comes from a seeded stream in record order, so this pass has to stay single
+/// threaded. Parallelising it would change which reads are drawn and so what a seed means. The
+/// full profile has no such constraint, which is why [`profile`] is a separate, parallel pass.
 pub(crate) struct DepthSkewDetector {
     rng: StdRng,
-    sample_all: bool,
-    // Full-input counts give the normalizer enough resolution at ordinary chromosome depth.
-    depth_sketch: CountMinSketch,
-    // The skew verdict keeps the sampled counting path introduced by the detector.
-    detection_sketch: Option<CountMinSketch>,
-    distinct: DistinctSample,
+    /// One read in `sample_denominator` is drawn. Only tests lower it.
+    sample_denominator: u32,
+    sketch: CountMinSketch,
+    sample: DistinctSample,
     positions: Vec<u32>,
     sampled_records: usize,
+    observed_minimizers: usize,
 }
 
 impl DepthSkewDetector {
-    pub(crate) fn detecting(seed: Option<u64>) -> Self {
-        Self::new(seed, false, true)
-    }
-
-    pub(crate) fn profiling(seed: Option<u64>) -> Self {
-        Self::new(seed, true, false)
-    }
-
-    fn new(seed: Option<u64>, sample_all: bool, detect_skew: bool) -> Self {
-        let rng = match seed {
-            Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_rng(&mut rand::rng()),
-        };
+    pub(crate) fn new(seed: Option<u64>) -> Self {
         Self {
-            rng,
-            sample_all,
-            depth_sketch: CountMinSketch::new(),
-            detection_sketch: detect_skew.then(CountMinSketch::new),
-            distinct: DistinctSample::new(DISTINCT_SAMPLE_SIZE),
+            rng: seeded_rng(seed),
+            sample_denominator: READ_SAMPLE_DENOMINATOR,
+            sketch: CountMinSketch::new(),
+            sample: DistinctSample::new(DISTINCT_SAMPLE_SIZE),
             positions: Vec::new(),
             sampled_records: 0,
+            observed_minimizers: 0,
         }
     }
 
+    /// Offer a read to the detection sample.
+    ///
+    /// A read that is not drawn costs one random number and nothing else. That is the whole point:
+    /// the minimizers of the other ninety-nine reads in a hundred are never computed.
     pub(crate) fn observe(&mut self, sequence: &[u8]) {
-        let selected = self.sample_all || self.rng.random_ratio(1, READ_SAMPLE_DENOMINATOR);
-        if selected {
-            self.sampled_records += 1;
+        if !self.rng.random_ratio(1, self.sample_denominator) {
+            return;
         }
 
-        for segment in sequence
-            .split(|base| !matches!(base, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
-        {
-            if segment.len() < KMER_LENGTH + WINDOW_WIDTH - 1 {
-                continue;
-            }
-
-            self.positions.clear();
-            let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
-                .run(AsciiSeq(segment), &mut self.positions);
-            for value in minimizers.values_u64() {
-                self.depth_sketch.increment(value);
-                if selected {
-                    if let Some(sketch) = &mut self.detection_sketch {
-                        sketch.increment(value);
-                    }
-                    self.distinct.observe(value);
-                }
-            }
-        }
+        self.sampled_records += 1;
+        let sketch = &self.sketch;
+        let sample = &mut self.sample;
+        let observed = &mut self.observed_minimizers;
+        for_each_minimizer(sequence, &mut self.positions, |value| {
+            sketch.increment(value);
+            sample.observe(value);
+            *observed += 1;
+        });
     }
 
-    pub(crate) fn finish(self) -> DepthProfile {
-        let sampled_records = self.sampled_records;
-        let report = match &self.detection_sketch {
-            Some(sketch) => depth_skew_report(sketch, &self.distinct.keys, sampled_records),
-            None => DepthSkewReport {
-                score: None,
-                skewed: false,
-                sampled_records: 0,
-            },
-        };
-        let mut counts: Vec<u32> = self
-            .distinct
-            .keys
-            .iter()
-            .map(|value| self.depth_sketch.estimate(*value))
-            .collect();
-        counts.sort_unstable();
-        let median = counts
-            .get((counts.len().saturating_sub(1)) / 2)
-            .copied()
-            .unwrap_or(1)
-            .max(1);
-
-        DepthProfile {
-            report,
-            sketch: self.depth_sketch,
-            median_count: median,
-            positions: self.positions,
-            counts,
+    pub(crate) fn finish(self) -> DepthDetection {
+        debug!(
+            "Depth detection drew {} minimizers from {} sampled reads",
+            self.observed_minimizers, self.sampled_records
+        );
+        DepthDetection {
+            report: depth_skew_report(&self.sketch, &self.sample.keys, self.sampled_records),
+            sample: self.sample,
         }
     }
 
     #[cfg(test)]
-    fn sampling_all() -> Self {
-        let mut detector = Self::detecting(Some(0));
-        detector.sample_all = true;
-        detector
+    fn sampling_all(seed: Option<u64>) -> Self {
+        Self {
+            sample_denominator: 1,
+            ..Self::new(seed)
+        }
+    }
+}
+
+/// What the detection pass leaves behind.
+pub(crate) struct DepthDetection {
+    pub(crate) report: DepthSkewReport,
+    /// The minimizers the detector sampled. [`profile`] scores these against the full counts to
+    /// find the input's median depth, so keeping them means the profiling pass does not have to
+    /// draw a sample of its own.
+    pub(crate) sample: DistinctSample,
+}
+
+/// Count every minimizer of every read, in parallel, and reduce that to a depth profile.
+///
+/// This is the expensive pass, so it only runs once normalization is going to happen. Nothing
+/// here draws a random number and sketch increments commute, so the profile does not depend on
+/// how the work was divided: the same input gives the same profile at any thread count.
+///
+/// `sample` is the minimizer sample the detector already drew. When it is `None` — a forced
+/// normalization, which never runs the detector — the pass draws its own from every read.
+pub(crate) fn profile(
+    input: &Path,
+    threads: usize,
+    sample: Option<DistinctSample>,
+) -> crate::Result<DepthProfile> {
+    let threads = threads.max(1);
+    debug!("Profiling read depth across the input on {threads} thread(s)...");
+    let sketch = CountMinSketch::new();
+    let draw_sample = sample.is_none();
+
+    let (read_result, drawn) = std::thread::scope(|scope| {
+        let (sender, receiver) = channel::bounded::<Vec<Vec<u8>>>(2 * threads);
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                let receiver = receiver.clone();
+                let sketch = &sketch;
+                scope.spawn(move || {
+                    let mut positions = Vec::new();
+                    let mut sample = draw_sample.then(|| DistinctSample::new(DISTINCT_SAMPLE_SIZE));
+                    for batch in receiver {
+                        for sequence in &batch {
+                            for_each_minimizer(sequence, &mut positions, |value| {
+                                sketch.increment(value);
+                                if let Some(sample) = &mut sample {
+                                    sample.observe(value);
+                                }
+                            });
+                        }
+                    }
+                    sample
+                })
+            })
+            .collect();
+        drop(receiver);
+
+        let mut batch = Vec::new();
+        let mut batch_bases = 0_usize;
+        let read_result = io::count_records(input, |sequence| {
+            batch_bases += sequence.len();
+            batch.push(sequence.to_vec());
+            if batch_bases >= PROFILE_BATCH_BASES {
+                batch_bases = 0;
+                // A send only fails once every worker has gone, which the join below reports.
+                let _ = sender.send(std::mem::take(&mut batch));
+            }
+            Ok(())
+        });
+        if !batch.is_empty() {
+            let _ = sender.send(batch);
+        }
+        drop(sender);
+
+        let drawn: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("depth profiling thread panicked"))
+            .collect();
+        (read_result, drawn)
+    });
+    read_result?;
+
+    let sample = match sample {
+        Some(sample) => sample,
+        // The smallest hashes of a union are the smallest hashes of its parts, so merging the
+        // workers' samples gives the same minimizers however the reads were divided up.
+        None => {
+            let mut merged = DistinctSample::new(DISTINCT_SAMPLE_SIZE);
+            for worker_sample in drawn.into_iter().flatten() {
+                for value in worker_sample.keys {
+                    merged.observe(value);
+                }
+            }
+            merged
+        }
+    };
+
+    let mut counts: Vec<u32> = sample
+        .keys
+        .iter()
+        .map(|value| sketch.estimate(*value))
+        .collect();
+    counts.sort_unstable();
+    let median_count = counts
+        .get(counts.len().saturating_sub(1) / 2)
+        .copied()
+        .unwrap_or(1)
+        .max(1);
+    debug!(
+        "Median depth is {median_count} across {} sampled minimizers",
+        counts.len()
+    );
+
+    Ok(DepthProfile {
+        sketch,
+        median_count,
+        positions: Vec::new(),
+        counts: Vec::new(),
+    })
+}
+
+/// Feed every canonical minimizer of `sequence` to `observe`.
+///
+/// A run of non-ACGT bases splits the read; a piece too short to hold a window has no minimizers.
+fn for_each_minimizer(sequence: &[u8], positions: &mut Vec<u32>, mut observe: impl FnMut(u64)) {
+    for segment in sequence
+        .split(|base| !matches!(base, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
+    {
+        if segment.len() < KMER_LENGTH + WINDOW_WIDTH - 1 {
+            continue;
+        }
+
+        positions.clear();
+        let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
+            .run(AsciiSeq(segment), positions);
+        for value in minimizers.values_u64() {
+            observe(value);
+        }
+    }
+}
+
+fn seeded_rng(seed: Option<u64>) -> StdRng {
+    match seed {
+        Some(seed) => StdRng::seed_from_u64(seed),
+        None => StdRng::from_rng(&mut rand::rng()),
     }
 }
 
@@ -187,7 +319,6 @@ fn depth_skew_report(
 }
 
 pub(crate) struct DepthProfile {
-    pub(crate) report: DepthSkewReport,
     sketch: CountMinSketch,
     median_count: u32,
     positions: Vec<u32>,
@@ -196,30 +327,19 @@ pub(crate) struct DepthProfile {
 
 impl DepthProfile {
     pub(crate) fn retention_probability(&mut self, sequence: &[u8]) -> f64 {
-        self.counts.clear();
-        for segment in sequence
-            .split(|base| !matches!(base, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
-        {
-            if segment.len() < KMER_LENGTH + WINDOW_WIDTH - 1 {
-                continue;
-            }
+        let sketch = &self.sketch;
+        let counts = &mut self.counts;
+        counts.clear();
+        for_each_minimizer(sequence, &mut self.positions, |value| {
+            counts.push(sketch.estimate(value));
+        });
 
-            self.positions.clear();
-            let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
-                .run(AsciiSeq(segment), &mut self.positions);
-            self.counts.extend(
-                minimizers
-                    .values_u64()
-                    .map(|value| self.sketch.estimate(value)),
-            );
-        }
-
-        if self.counts.is_empty() {
+        if counts.is_empty() {
             return 1.0;
         }
 
-        let middle = (self.counts.len() - 1) / 2;
-        let (_, read_depth, _) = self.counts.select_nth_unstable(middle);
+        let middle = (counts.len() - 1) / 2;
+        let (_, read_depth, _) = counts.select_nth_unstable(middle);
         let read_depth = (*read_depth).max(1);
         let target = self
             .median_count
@@ -229,26 +349,49 @@ impl DepthProfile {
 }
 
 struct CountMinSketch {
-    counters: Box<[u32]>,
+    counters: Box<[AtomicU32]>,
 }
 
 impl CountMinSketch {
     fn new() -> Self {
         Self {
-            counters: vec![0; SKETCH_ROWS * SKETCH_WIDTH].into_boxed_slice(),
+            counters: (0..SKETCH_ROWS * SKETCH_WIDTH)
+                .map(|_| AtomicU32::new(0))
+                .collect(),
         }
     }
 
-    fn increment(&mut self, value: u64) {
+    /// Add one to each of the counters this minimizer maps to.
+    ///
+    /// Addition commutes, so threads sharing a sketch reach the same counts as one thread would.
+    /// A counter holds at its maximum rather than wrapping, which takes a compare-and-swap rather
+    /// than a plain add. Saturating needs about four billion occurrences of one minimizer, so this
+    /// is defensive, but leaving the ceiling to a race would leave the counts thread dependent.
+    /// The loop is written out because `fetch_update` is deprecated on newer toolchains and its
+    /// replacement does not exist on the one this crate supports.
+    fn increment(&self, value: u64) {
         for row in 0..SKETCH_ROWS {
-            let index = row * SKETCH_WIDTH + sketch_index(value, row);
-            self.counters[index] = self.counters[index].saturating_add(1);
+            let counter = &self.counters[row * SKETCH_WIDTH + sketch_index(value, row)];
+            let mut count = counter.load(Ordering::Relaxed);
+            while count < u32::MAX {
+                match counter.compare_exchange_weak(
+                    count,
+                    count + 1,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(observed) => count = observed,
+                }
+            }
         }
     }
 
     fn estimate(&self, value: u64) -> u32 {
         (0..SKETCH_ROWS)
-            .map(|row| self.counters[row * SKETCH_WIDTH + sketch_index(value, row)])
+            .map(|row| {
+                self.counters[row * SKETCH_WIDTH + sketch_index(value, row)].load(Ordering::Relaxed)
+            })
             .min()
             .unwrap_or_default()
     }
@@ -265,7 +408,11 @@ fn mix64(mut value: u64) -> u64 {
     value ^ (value >> 31)
 }
 
-struct DistinctSample {
+/// The minimizers with the smallest hashes seen so far, at most `capacity` of them.
+///
+/// Which minimizers this keeps depends only on the set it was shown, not the order, so two of
+/// these can be merged by showing one the other's keys.
+pub(crate) struct DistinctSample {
     capacity: usize,
     entries: BinaryHeap<(u64, u64)>,
     keys: HashSet<u64>,
@@ -301,6 +448,7 @@ impl DistinctSample {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     fn pseudo_random_dna(len: usize, seed: u64) -> Vec<u8> {
         let mut state = seed;
@@ -314,18 +462,33 @@ mod tests {
             .collect()
     }
 
+    /// A file of `records` reads of `length` bases, each read distinct from the others.
+    fn fasta(records: usize, length: usize) -> tempfile::NamedTempFile {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        for index in 0..records {
+            writeln!(
+                input,
+                ">read{index}\n{}",
+                String::from_utf8(pseudo_random_dna(length, index as u64 + 1)).unwrap()
+            )
+            .unwrap();
+        }
+        input.flush().unwrap();
+        input
+    }
+
     #[test]
     fn distinguishes_high_copy_sequence_from_even_coverage() {
         let chromosome = pseudo_random_dna(20_000, 1);
         let plasmid = pseudo_random_dna(2_000, 2);
 
-        let mut even = DepthSkewDetector::sampling_all();
+        let mut even = DepthSkewDetector::sampling_all(Some(0));
         for _ in 0..40 {
             even.observe(&chromosome);
         }
         let even = even.finish().report;
 
-        let mut skewed = DepthSkewDetector::sampling_all();
+        let mut skewed = DepthSkewDetector::sampling_all(Some(0));
         for _ in 0..40 {
             skewed.observe(&chromosome);
         }
@@ -351,5 +514,72 @@ mod tests {
             report.to_string(),
             "Depth skew detected (99.9th percentile minimizer count is 21.25x the median; sampled reads: 87)"
         );
+    }
+
+    /// Detection cost has to stay proportional to the reads it samples, not to the whole input.
+    /// If the full profile ever creeps back into the counting pass, this is what catches it.
+    #[test]
+    fn detection_draws_minimizers_only_from_the_sampled_reads() {
+        let read = pseudo_random_dna(2_000, 7);
+        let mut detector = DepthSkewDetector::new(Some(42));
+        for _ in 0..2_000 {
+            detector.observe(&read);
+        }
+
+        let sampled = detector.sampled_records;
+        let drawn = detector.observed_minimizers;
+        let per_read = {
+            let mut one = DepthSkewDetector::sampling_all(Some(42));
+            one.observe(&read);
+            one.observed_minimizers
+        };
+
+        assert!(per_read > 0, "the test read has no minimizers");
+        assert!(
+            (5..=60).contains(&sampled),
+            "sampled {sampled} of 2000 reads"
+        );
+        assert_eq!(
+            drawn,
+            sampled * per_read,
+            "minimizers were drawn from reads outside the detection sample"
+        );
+    }
+
+    #[test]
+    fn profile_does_not_depend_on_the_thread_count() {
+        // Large enough to fill several batches and to push the minimizer sample past its capacity,
+        // so the workers' samples actually have to be merged.
+        let input = fasta(800, 5_000);
+        let reads: Vec<Vec<u8>> = (0..800)
+            .map(|index| pseudo_random_dna(5_000, index + 1))
+            .collect();
+
+        let mut single = profile(input.path(), 1, None).unwrap();
+        let mut many = profile(input.path(), 4, None).unwrap();
+
+        assert_eq!(single.median_count, many.median_count);
+        for read in &reads {
+            assert_eq!(
+                single.retention_probability(read),
+                many.retention_probability(read)
+            );
+        }
+    }
+
+    #[test]
+    fn profiling_scores_reads_against_the_detector_sample() {
+        let input = fasta(200, 2_000);
+        let mut detector = DepthSkewDetector::sampling_all(Some(3));
+        io::count_records(input.path(), |sequence| {
+            detector.observe(sequence);
+            Ok(())
+        })
+        .unwrap();
+        let detection = detector.finish();
+
+        let profile = profile(input.path(), 2, Some(detection.sample)).unwrap();
+
+        assert!(profile.median_count >= 1);
     }
 }

@@ -8,7 +8,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 
-use crate::depth_skew::{DepthProfile, DepthSkewDetector, DepthSkewReport};
+use crate::depth_skew::{self, DepthProfile, DepthSkewDetector, DepthSkewReport, DistinctSample};
 use crate::{io, Normalization, Result, DEFAULT_MAX_READ_BUFFER};
 
 /// Bytes charged to a buffered read on top of its identifier and sequence, covering the two
@@ -22,7 +22,10 @@ pub(crate) struct ReadSelector {
     seed: Option<u64>,
     normalization: Normalization,
     depth_skew: DepthSkewReport,
+    /// The minimizers the detector sampled, held until the profiling pass scores them.
+    minimizer_sample: Option<DistinctSample>,
     depth_profile: Option<DepthProfile>,
+    threads: usize,
     max_read_buffer: u64,
 }
 
@@ -46,34 +49,25 @@ impl ReadSelector {
     ) -> Result<Self> {
         let input = input.as_ref().to_path_buf();
         let mut total_bases = 0_usize;
-        let (num_records, depth_skew, depth_profile) = if normalization == Normalization::Never {
-            let num_records = io::count_records(&input, |sequence| {
-                total_bases += sequence.len();
-                Ok(())
-            })?;
-            (
-                num_records,
-                DepthSkewReport {
-                    score: None,
-                    skewed: false,
-                    sampled_records: 0,
-                },
-                None,
-            )
-        } else {
-            let mut detector = match normalization {
-                Normalization::Auto => DepthSkewDetector::detecting(seed),
-                Normalization::Always => DepthSkewDetector::profiling(seed),
-                Normalization::Never => unreachable!("handled above"),
-            };
-            let num_records = io::count_records(&input, |sequence| {
-                total_bases += sequence.len();
+        // Forcing or refusing normalization makes the verdict irrelevant, so those runs do no
+        // depth work in the counting pass at all.
+        let mut detector = match normalization {
+            Normalization::Auto => Some(DepthSkewDetector::new(seed)),
+            Normalization::Always | Normalization::Never => None,
+        };
+        let num_records = io::count_records(&input, |sequence| {
+            total_bases += sequence.len();
+            if let Some(detector) = &mut detector {
                 detector.observe(sequence);
-                Ok(())
-            })?;
-            let profile = detector.finish();
-            let report = profile.report.clone();
-            (num_records, report, Some(profile))
+            }
+            Ok(())
+        })?;
+        let (depth_skew, minimizer_sample) = match detector {
+            Some(detector) => {
+                let detection = detector.finish();
+                (detection.report, Some(detection.sample))
+            }
+            None => (DepthSkewReport::not_assessed(), None),
         };
 
         Ok(Self {
@@ -83,9 +77,20 @@ impl ReadSelector {
             seed,
             normalization,
             depth_skew,
-            depth_profile,
+            minimizer_sample,
+            depth_profile: None,
+            threads: 1,
             max_read_buffer: DEFAULT_MAX_READ_BUFFER,
         })
+    }
+
+    /// Set the number of threads the depth profiling pass may use.
+    ///
+    /// The pass only runs when normalization engages, and the profile it builds is the same
+    /// whatever thread count builds it.
+    pub(crate) fn threads(mut self, threads: usize) -> Self {
+        self.threads = threads;
+        self
     }
 
     /// Set the cap on the bytes of selected reads normalization may hold in memory at once.
@@ -225,6 +230,20 @@ impl ReadSelector {
         })
     }
 
+    /// Build the full depth profile unless a previous selection already did.
+    ///
+    /// This is the pass that counts every minimizer of every read. Holding it back until
+    /// normalization is going to happen is what keeps it off an unskewed run.
+    fn ensure_depth_profile(&mut self) -> Result<()> {
+        if self.depth_profile.is_some() {
+            return Ok(());
+        }
+
+        let sample = self.minimizer_sample.take();
+        self.depth_profile = Some(depth_skew::profile(&self.input, self.threads, sample)?);
+        Ok(())
+    }
+
     fn normalization_engaged(&self) -> bool {
         match self.normalization {
             Normalization::Auto => self.depth_skew.skewed,
@@ -234,29 +253,36 @@ impl ReadSelector {
     }
 
     fn write_normalized(&mut self, outputs: &[(&Path, usize)]) -> Result<SelectionResult> {
+        self.ensure_depth_profile()?;
         let capacity = outputs.iter().map(|(_, count)| count).sum();
         let projected = self.projected_buffer_bytes(capacity);
         debug!(
             "Buffering {capacity} selected reads projects to about {projected} bytes against a {} byte cap",
             self.max_read_buffer
         );
-        if projected > self.max_read_buffer {
-            self.write_normalized_streamed(outputs, capacity)
+
+        // Lending the profile to the writer is what lets them take it as a plain argument, so
+        // neither has to restate that normalization cannot run without one.
+        let mut profile = self
+            .depth_profile
+            .take()
+            .expect("ensure_depth_profile built one");
+        let selection = if projected > self.max_read_buffer {
+            self.write_normalized_streamed(&mut profile, outputs, capacity)
         } else {
-            self.write_normalized_buffered(outputs, capacity)
-        }
+            self.write_normalized_buffered(&mut profile, outputs, capacity)
+        };
+        self.depth_profile = Some(profile);
+        selection
     }
 
     /// Select and buffer the reads in one pass, then write them out.
     fn write_normalized_buffered(
-        &mut self,
+        &self,
+        profile: &mut DepthProfile,
         outputs: &[(&Path, usize)],
         capacity: usize,
     ) -> Result<SelectionResult> {
-        let profile = self
-            .depth_profile
-            .as_mut()
-            .expect("normalization requires a depth profile");
         let mut sampler = NormalizedSampler::new(capacity, self.seed);
         let mut reservoir: Vec<BufferedRecord> = Vec::with_capacity(capacity);
         let mut buffer_bytes = 0_u64;
@@ -326,14 +352,11 @@ impl ReadSelector {
     /// keeps a large request inside the read-buffer cap. It drives the same [`NormalizedSampler`]
     /// in the same order as the buffered path, so a seed picks the same reads either way.
     fn write_normalized_streamed(
-        &mut self,
+        &self,
+        profile: &mut DepthProfile,
         outputs: &[(&Path, usize)],
         capacity: usize,
     ) -> Result<SelectionResult> {
-        let profile = self
-            .depth_profile
-            .as_mut()
-            .expect("normalization requires a depth profile");
         let mut sampler = NormalizedSampler::new(capacity, self.seed);
         let mut input_index = 0_usize;
 
@@ -727,6 +750,63 @@ mod tests {
 
         let expected = b">read0\nAAA\n>read2\nGGG\n";
         assert_eq!(std::fs::read(selected).unwrap(), expected);
+    }
+
+    /// The full depth profile is the expensive pass. An unskewed run must not build one.
+    #[test]
+    fn auto_does_not_profile_an_unskewed_input() {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        for index in 0..100 {
+            writeln!(
+                input,
+                ">read{index}\n{}",
+                String::from_utf8(pseudo_random_dna(250, index + 1)).unwrap()
+            )
+            .unwrap();
+        }
+        let tempdir = tempfile::tempdir().unwrap();
+        let selected = tempdir.path().join("selected.fa");
+
+        let mut auto = ReadSelector::new(input.path(), Some(42), Normalization::Auto).unwrap();
+        auto.write_selected(&[(selected.as_path(), 20)], None)
+            .unwrap();
+
+        assert!(!auto.depth_skew().skewed);
+        assert!(
+            auto.depth_profile.is_none(),
+            "an unskewed run built the full depth profile"
+        );
+    }
+
+    #[test]
+    fn a_seed_selects_the_same_reads_at_any_thread_count() {
+        let input = skewed_input();
+        let tempdir = tempfile::tempdir().unwrap();
+        let one_thread = tempdir.path().join("one.fa");
+        let many_threads = tempdir.path().join("many.fa");
+
+        let mut single = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+            .unwrap()
+            .threads(1);
+        let single_selection = single
+            .write_selected(&[(one_thread.as_path(), 20)], None)
+            .unwrap();
+        let mut many = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+            .unwrap()
+            .threads(4);
+        let many_selection = many
+            .write_selected(&[(many_threads.as_path(), 20)], None)
+            .unwrap();
+
+        assert!(single_selection.normalized);
+        assert_eq!(
+            single_selection.retained_records,
+            many_selection.retained_records
+        );
+        assert_eq!(
+            std::fs::read(one_thread).unwrap(),
+            std::fs::read(many_threads).unwrap()
+        );
     }
 
     #[test]
