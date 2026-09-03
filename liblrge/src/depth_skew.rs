@@ -364,15 +364,26 @@ impl CountMinSketch {
     /// Add one to each of the counters this minimizer maps to.
     ///
     /// Addition commutes, so threads sharing a sketch reach the same counts as one thread would.
-    /// A counter holds at its maximum rather than wrapping, which takes a read-modify-write rather
+    /// A counter holds at its maximum rather than wrapping, which takes a compare-and-swap rather
     /// than a plain add. Saturating needs about four billion occurrences of one minimizer, so this
     /// is defensive, but leaving the ceiling to a race would leave the counts thread dependent.
+    /// The loop is written out because `fetch_update` is deprecated on newer toolchains and its
+    /// replacement does not exist on the one this crate supports.
     fn increment(&self, value: u64) {
         for row in 0..SKETCH_ROWS {
             let counter = &self.counters[row * SKETCH_WIDTH + sketch_index(value, row)];
-            let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
-                count.checked_add(1)
-            });
+            let mut count = counter.load(Ordering::Relaxed);
+            while count < u32::MAX {
+                match counter.compare_exchange_weak(
+                    count,
+                    count + 1,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(observed) => count = observed,
+                }
+            }
         }
     }
 
