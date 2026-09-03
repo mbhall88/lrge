@@ -14,6 +14,24 @@ use crate::io;
 const KMER_LENGTH: usize = 15;
 const WINDOW_WIDTH: usize = 9;
 const READ_SAMPLE_DENOMINATOR: u32 = 100;
+/// The fewest reads detection will settle for, when the input holds that many.
+///
+/// Below this the 99.9th percentile of minimizer counts moves with the draw rather than with the
+/// input. `SRR26715166` holds 7,473 reads, so one in a hundred is about 70 of them, and over
+/// twelve seeds its score ranged 12x to 22x around a mean of 18.0 with a standard deviation of
+/// 2.9. The 16x threshold sat 0.7 standard deviations below that mean and two of the twelve seeds
+/// missed a genuinely skewed input. 500 reads puts the threshold about 1.75 standard deviations
+/// out. #36 refits this against the benchmark.
+pub(crate) const DETECTION_READ_FLOOR: usize = 500;
+/// The most the reserve will hold, whatever the reads turn out to be.
+///
+/// [`DETECTION_READ_FLOOR`] reads is 3.5 MB at a 7 kb read length, but read length has no upper
+/// bound and five hundred ultra-long reads would be hundreds of megabytes. Past this the reserve
+/// drops its largest hashes, so it holds the reads that fit rather than all of them. That leaves
+/// it short of the floor on an input averaging more than about 128 kb a read, which is the trade:
+/// what is scarce on an input like that is reads, and there is no bound on how much memory
+/// gathering more of them could take.
+const DETECTION_RESERVE_BYTES: usize = 64 << 20;
 // One minimizer in 2^MINIMIZER_SAMPLE_SHIFT reaches the sketch. The gate is a hash of the
 // minimizer, so a minimizer is either always counted or never counted: a sampled minimizer ends up
 // with the count it would have had anyway, and every pass over the input agrees on which
@@ -127,7 +145,13 @@ impl fmt::Display for DepthSkewReport {
 /// This rides along with the pass that counts the records, so it is the only depth work an
 /// unskewed run pays for. It draws minimizers from roughly one read in
 /// [`READ_SAMPLE_DENOMINATOR`] and skips the rest entirely: the reads it does not sample cost it
-/// nothing beyond one random number.
+/// nothing beyond one random number and, while the reserve is open, a copy.
+///
+/// One in a hundred is too few reads on a small input, and the record count is not known until the
+/// pass that feeds this one has finished. So a [`ReadReserve`] holds on to reads the draw passed
+/// over, and [`finish`](Self::finish) tops the sample up from it when the draw came up short of
+/// [`DETECTION_READ_FLOOR`]. The reserve closes the moment the draw reaches the floor on its own,
+/// which is why a large input pays for it only over its first reads.
 ///
 /// The sample comes from a seeded stream in record order, so this pass has to stay single
 /// threaded. Parallelising it would change which reads are drawn and so what a seed means. The
@@ -138,19 +162,35 @@ pub(crate) struct DepthSkewDetector {
     sample_denominator: u32,
     sketch: CountMinSketch,
     sample: DistinctSample,
+    /// Detection settles for no fewer reads than this. Only tests lower it.
+    read_floor: usize,
+    /// Reads the draw passed over, to top the sample up from if it comes up short.
+    reserve: ReadReserve,
     positions: Vec<u32>,
+    observed_records: usize,
     sampled_records: usize,
     sketched_minimizers: usize,
 }
 
 impl DepthSkewDetector {
     pub(crate) fn new(seed: Option<u64>) -> Self {
+        Self::sampling(seed, READ_SAMPLE_DENOMINATOR, DETECTION_READ_FLOOR)
+    }
+
+    /// A detector that draws one read in `one_in` and settles for no fewer than `at_least`.
+    ///
+    /// The reserve is sized here and nowhere else, so it cannot end up holding too few reads to
+    /// reach the floor it is meant to serve.
+    fn sampling(seed: Option<u64>, one_in: u32, at_least: usize) -> Self {
         Self {
             rng: seeded_rng(seed),
-            sample_denominator: READ_SAMPLE_DENOMINATOR,
+            sample_denominator: one_in,
             sketch: CountMinSketch::new(),
             sample: DistinctSample::new(DISTINCT_SAMPLE_SIZE),
+            read_floor: at_least,
+            reserve: ReadReserve::new(at_least, reserve_salt(seed)),
             positions: Vec::new(),
+            observed_records: 0,
             sampled_records: 0,
             sketched_minimizers: 0,
         }
@@ -158,13 +198,26 @@ impl DepthSkewDetector {
 
     /// Offer a read to the detection sample.
     ///
-    /// A read that is not drawn costs one random number and nothing else. That is the whole point:
-    /// the minimizers of the other ninety-nine reads in a hundred are never computed.
+    /// A read that is not drawn has its minimizers left uncomputed, which is the whole point. It
+    /// is copied into the reserve while that is open, and once the draw has reached the floor it
+    /// costs one random number and nothing else.
     pub(crate) fn observe(&mut self, sequence: &[u8]) {
+        let index = self.observed_records;
+        self.observed_records += 1;
+
         if !self.rng.random_ratio(1, self.sample_denominator) {
+            self.reserve.offer(index, sequence);
             return;
         }
 
+        self.sketch_read(sequence);
+        if self.sampled_records >= self.read_floor {
+            self.reserve.close();
+        }
+    }
+
+    /// Count a read's minimizers into the sketch and the bottom-k sample.
+    fn sketch_read(&mut self, sequence: &[u8]) {
         self.sampled_records += 1;
         let sketch = &self.sketch;
         let sample = &mut self.sample;
@@ -176,7 +229,22 @@ impl DepthSkewDetector {
         });
     }
 
-    pub(crate) fn finish(self) -> DepthDetection {
+    pub(crate) fn finish(mut self) -> DepthDetection {
+        // The reserve holds only reads the draw passed over, so nothing here is counted twice.
+        let short = self.read_floor.saturating_sub(self.sampled_records);
+        if short > 0 {
+            let topped_up = self.reserve.take(short);
+            debug!(
+                "Depth detection drew {} reads, short of {}, so it took {} more from reserve",
+                self.sampled_records,
+                self.read_floor,
+                topped_up.len()
+            );
+            for sequence in topped_up {
+                self.sketch_read(&sequence);
+            }
+        }
+
         debug!(
             "Depth detection sketched {} minimizers from {} sampled reads",
             self.sketched_minimizers, self.sampled_records
@@ -189,10 +257,7 @@ impl DepthSkewDetector {
 
     #[cfg(test)]
     fn sampling_all(seed: Option<u64>) -> Self {
-        Self {
-            sample_denominator: 1,
-            ..Self::new(seed)
-        }
+        Self::sampling(seed, 1, DETECTION_READ_FLOOR)
     }
 }
 
@@ -495,6 +560,109 @@ fn mix64(mut value: u64) -> u64 {
     value ^ (value >> 31)
 }
 
+/// The reads detection falls back on when its draw comes up short of the floor.
+///
+/// Holds at most `capacity` reads, the ones with the smallest hashes among those the draw passed
+/// over, so which reads it holds turns on the seed rather than on their order in the file. It
+/// stops taking reads and releases what it holds the moment the draw reaches the floor on its own,
+/// so an input large enough to get there carries it only over its first reads.
+///
+/// The reads are held as sequences rather than as minimizers because most of them are never used:
+/// a read enters and is evicted again, and computing its minimizers on the way in would roughly
+/// double what detection costs a large input. Evicting reuses the buffer it frees, so what is held
+/// is the reads kept rather than one allocation for every read that ever passed through, and
+/// [`DETECTION_RESERVE_BYTES`] caps that however long the reads are.
+struct ReadReserve {
+    capacity: usize,
+    byte_cap: usize,
+    salt: u64,
+    /// Ordered so the largest hash, the next to be evicted, is on top.
+    entries: BinaryHeap<(u64, usize, Vec<u8>)>,
+    /// What the buffers held below have reserved, which is what the cap is against.
+    bytes: usize,
+    open: bool,
+}
+
+impl ReadReserve {
+    fn new(capacity: usize, salt: u64) -> Self {
+        Self {
+            capacity,
+            byte_cap: DETECTION_RESERVE_BYTES,
+            salt,
+            entries: BinaryHeap::with_capacity(capacity),
+            bytes: 0,
+            open: capacity > 0,
+        }
+    }
+
+    /// Offer a read the draw passed over.
+    fn offer(&mut self, index: usize, sequence: &[u8]) {
+        if !self.open {
+            return;
+        }
+
+        let key = (mix64(index as u64 ^ self.salt), index);
+        if self.entries.len() < self.capacity {
+            let held = sequence.to_vec();
+            self.bytes += held.capacity();
+            self.entries.push((key.0, key.1, held));
+        } else if self
+            .entries
+            .peek()
+            .is_some_and(|(hash, index, _)| (*hash, *index) > key)
+        {
+            // Take the evicted read's buffer rather than allocating another. Far more reads pass
+            // through the reserve than sit in it, and allocating for each one leaves the process
+            // holding the high-water mark of all of them rather than of the ones it kept.
+            let (_, _, mut buffer) = self.entries.pop().expect("the reserve is full");
+            self.bytes -= buffer.capacity();
+            buffer.clear();
+            buffer.extend_from_slice(sequence);
+            self.bytes += buffer.capacity();
+            self.entries.push((key.0, key.1, buffer));
+        } else {
+            return;
+        }
+
+        // Drop the largest hashes until what is held fits. The smallest hashes that fit are still
+        // an unbiased sample of the reads offered, just a smaller one, and lowering the capacity
+        // with them keeps later reads on the branch that reuses a buffer instead of allocating.
+        while self.bytes > self.byte_cap && self.entries.len() > 1 {
+            let (_, _, dropped) = self.entries.pop().expect("more than one read is held");
+            self.bytes -= dropped.capacity();
+            self.capacity = self.entries.len();
+        }
+    }
+
+    /// Stop taking reads and release the ones held.
+    fn close(&mut self) {
+        self.open = false;
+        self.entries = BinaryHeap::new();
+        self.bytes = 0;
+    }
+
+    /// Give up `wanted` of the reads held, smallest hash first.
+    fn take(&mut self, wanted: usize) -> Vec<Vec<u8>> {
+        self.bytes = 0;
+        let mut held: Vec<_> = std::mem::take(&mut self.entries).into_vec();
+        held.sort_unstable_by_key(|(hash, index, _)| (*hash, *index));
+        held.truncate(wanted);
+        held.into_iter().map(|(_, _, sequence)| sequence).collect()
+    }
+}
+
+/// The salt that decides which reads the reserve holds.
+///
+/// Drawn separately from the detector's own generator, so that holding reads in reserve does not
+/// shift the stream the draw comes from. Were it to shift, every input large enough to ignore the
+/// reserve would still sample different reads than it did before the reserve existed.
+fn reserve_salt(seed: Option<u64>) -> u64 {
+    match seed {
+        Some(seed) => mix64(seed ^ 0xa076_1d64_78bd_642f),
+        None => rand::rng().random(),
+    }
+}
+
 /// The minimizers with the smallest hashes seen so far, at most `capacity` of them.
 ///
 /// Which minimizers this keeps depends only on the set it was shown, not the order, so two of
@@ -549,15 +717,41 @@ mod tests {
             .collect()
     }
 
-    /// The minimizer sample a detection pass over `input` leaves behind.
-    fn detect(input: &std::path::Path) -> DistinctSample {
-        let mut detector = DepthSkewDetector::sampling_all(Some(3));
+    /// Run `detector` over every record of `input`.
+    fn run_detection(input: &std::path::Path, mut detector: DepthSkewDetector) -> DepthDetection {
         io::count_records(input, |sequence| {
             detector.observe(sequence);
             Ok(())
         })
         .unwrap();
-        detector.finish().sample
+        detector.finish()
+    }
+
+    /// The minimizer sample a detection pass over `input` leaves behind.
+    fn detect(input: &std::path::Path) -> DistinctSample {
+        run_detection(input, DepthSkewDetector::sampling_all(Some(3))).sample
+    }
+
+    /// A file of reads drawn from two sequences at different depths, so a minimizer's count
+    /// depends on which reads were sampled rather than being 1 for all of them.
+    fn two_depth_fasta(records: usize) -> tempfile::NamedTempFile {
+        let chromosome = pseudo_random_dna(20_000, 1);
+        let element = pseudo_random_dna(2_000, 2);
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        for index in 0..records {
+            let source = if index % 2 == 0 {
+                &chromosome
+            } else {
+                &element
+            };
+            let start = index * 137 % source.len();
+            let read: Vec<u8> = (0..800)
+                .map(|offset| source[(start + offset) % source.len()])
+                .collect();
+            writeln!(input, ">read{index}\n{}", String::from_utf8(read).unwrap()).unwrap();
+        }
+        input.flush().unwrap();
+        input
     }
 
     /// A file of `records` reads of `length` bases, each read distinct from the others.
@@ -726,6 +920,104 @@ mod tests {
             "the gate kept {kept}, too few to fill the sample"
         );
         assert_eq!(from_sample.keys, from_everything.keys);
+    }
+
+    /// One read in a hundred of a small input is too few for the 99.9th percentile to sit still,
+    /// so the sample is topped up to the floor from reads the draw passed over.
+    #[test]
+    fn a_small_input_is_topped_up_to_the_floor() {
+        let input = fasta(2_000, 400);
+
+        let report = run_detection(input.path(), DepthSkewDetector::new(Some(11))).report;
+
+        assert_eq!(report.sampled_records, DETECTION_READ_FLOOR);
+    }
+
+    /// An input smaller than the floor has every read sampled, and the top-up cannot double count
+    /// a read the draw already took.
+    #[test]
+    fn an_input_below_the_floor_has_every_read_sampled() {
+        let records = 300;
+        let input = fasta(records, 400);
+
+        let report = run_detection(input.path(), DepthSkewDetector::new(Some(11))).report;
+
+        assert_eq!(report.sampled_records, records);
+    }
+
+    /// An input whose own draw clears the floor must sample exactly what it sampled before the
+    /// floor existed. Holding reads in reserve must not disturb the draw, or every large input's
+    /// verdict would move.
+    #[test]
+    fn a_draw_that_clears_the_floor_is_left_alone() {
+        let input = fasta(6_000, 400);
+        let report = |floor| {
+            run_detection(
+                input.path(),
+                DepthSkewDetector::sampling(Some(11), 10, floor),
+            )
+            .report
+        };
+
+        let floored = report(DETECTION_READ_FLOOR);
+        let unfloored = report(0);
+
+        assert!(
+            floored.sampled_records > DETECTION_READ_FLOOR,
+            "the draw took {} reads, which does not clear the floor",
+            floored.sampled_records
+        );
+        assert_eq!(floored.sampled_records, unfloored.sampled_records);
+        assert_eq!(floored.score, unfloored.score);
+        assert_eq!(floored.skewed, unfloored.skewed);
+    }
+
+    /// Reads have no bounded length, so the reserve has to stop at what it holds rather than at
+    /// how many it holds. What survives must still be the smallest hashes of everything offered,
+    /// or the top-up would favour whichever reads arrived first.
+    #[test]
+    fn the_reserve_stops_at_its_byte_cap_and_stays_a_bottom_k_sample() {
+        let offered = 2_000;
+        let salt = 7;
+        let mut reserve = ReadReserve::new(DETECTION_READ_FLOOR, salt);
+        reserve.byte_cap = 1 << 16;
+        let read = vec![b'A'; 4_000];
+
+        for index in 0..offered {
+            reserve.offer(index, &read);
+        }
+
+        assert!(
+            reserve.bytes <= reserve.byte_cap,
+            "the reserve holds {} bytes against a cap of {}",
+            reserve.bytes,
+            reserve.byte_cap
+        );
+        assert!(!reserve.entries.is_empty());
+        assert!(reserve.entries.len() < DETECTION_READ_FLOOR);
+
+        let mut kept: Vec<u64> = reserve.entries.iter().map(|(hash, _, _)| *hash).collect();
+        kept.sort_unstable();
+        let mut all: Vec<u64> = (0..offered as u64)
+            .map(|index| mix64(index ^ salt))
+            .collect();
+        all.sort_unstable();
+        assert_eq!(kept, all[..kept.len()]);
+    }
+
+    /// A seed has to mean one sample, top-up included, or a rerun could change the verdict.
+    /// Reseeding has to redraw it, or the floor would hand every run the same reads.
+    #[test]
+    fn the_topped_up_sample_is_the_same_for_a_seed_and_differs_between_seeds() {
+        let input = two_depth_fasta(2_000);
+        let report = |seed| run_detection(input.path(), DepthSkewDetector::new(Some(seed))).report;
+
+        assert_eq!(report(11).score, report(11).score);
+        let baseline = report(11).score;
+        assert!(
+            (12..20).any(|seed| report(seed).score != baseline),
+            "eight reseeds all drew a sample scoring {baseline:?}"
+        );
     }
 
     #[test]

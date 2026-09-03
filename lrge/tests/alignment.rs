@@ -54,14 +54,22 @@ fn test_toy_bam_input() {
     let bam_path = std::path::Path::new("tests").join("data").join("toy.bam");
 
     if bam_path.exists() {
-        // Use a fixed seed to ensure deterministic behavior across platforms
+        // What this test is for is that a BAM reaches the estimator, so it takes the depth
+        // machinery out of the way. Two things otherwise decide whether it passes, neither of them
+        // about BAM: ten target and five query reads out of the fixture's five hundred overlap
+        // only on a lucky seed, and the fixture is small enough that detection now samples every
+        // read of it and calls it skewed, which moves the estimate by about fivefold at a profile
+        // median depth of one. That second one is a real question about low-coverage input and it
+        // is filed separately, not something to settle inside a BAM test.
         cmd.arg(bam_path)
             .arg("-T")
-            .arg("10")
+            .arg("100")
             .arg("-Q")
-            .arg("5")
+            .arg("50")
             .arg("--seed")
             .arg("6")
+            .arg("--normalize")
+            .arg("never")
             .assert()
             .success();
     }
