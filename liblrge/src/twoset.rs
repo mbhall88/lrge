@@ -129,6 +129,7 @@ impl TwoSetStrategy {
     fn split_fastq(&mut self) -> crate::Result<(PathBuf, PathBuf, f32)> {
         debug!("Counting records in input file...");
         let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?
+            .threads(self.threads)
             .max_read_buffer(self.max_read_buffer);
         if self.normalization == Normalization::Auto && !selector.depth_skew().skewed {
             debug!("{}", selector.depth_skew());

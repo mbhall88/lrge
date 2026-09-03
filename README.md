@@ -396,6 +396,11 @@ query reads from the normalized pool. LRGE reports the skew score and retained r
 level so the depth-skewed input is not overlooked. Inputs without detected skew use the original
 sampling path unchanged.
 
+Detection itself is cheap: it draws minimizers from about one read in a hundred and skips the rest.
+Building the full depth profile that normalization needs costs a second pass over the input, so LRGE
+only takes that pass once it has decided to normalize, and the pass uses the thread count given to
+`--threads`. An input with no detected skew therefore costs little more than `--normalize never`.
+
 Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
 disable both detection and normalization. A wide reported interval means the per-read estimates
 disagree. Uneven depth is one possible cause; repeats, sparse overlaps, or too few sampled reads can

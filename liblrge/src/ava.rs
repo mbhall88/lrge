@@ -111,6 +111,7 @@ impl AvaStrategy {
     fn subsample_reads(&mut self) -> crate::Result<(PathBuf, usize)> {
         debug!("Counting records in input file...");
         let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?
+            .threads(self.threads)
             .max_read_buffer(self.max_read_buffer);
         if self.normalization == Normalization::Auto && !selector.depth_skew().skewed {
             debug!("{}", selector.depth_skew());
