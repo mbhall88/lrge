@@ -14,9 +14,60 @@ use crate::io;
 const KMER_LENGTH: usize = 15;
 const WINDOW_WIDTH: usize = 9;
 const READ_SAMPLE_DENOMINATOR: u32 = 100;
-const SKETCH_ROWS: usize = 4;
-// Use 2^20 columns so sketch_index can replace modulo with a bit mask.
-const SKETCH_WIDTH: usize = 1 << 20;
+// One minimizer in 2^MINIMIZER_SAMPLE_SHIFT reaches the sketch. The gate is a hash of the
+// minimizer, so a minimizer is either always counted or never counted: a sampled minimizer ends up
+// with the count it would have had anyway, and every pass over the input agrees on which
+// minimizers those are.
+//
+// What the sketch holds is dominated by sequencing error. A gigabase of long reads carries on the
+// order of 200 million minimizer occurrences, and the great majority of the distinct values among
+// them are singletons that exist in one read only. Spread over 4,194,304 counters, four to a
+// value, that puts about 190 in every counter before a single genuine count arrives, and a
+// minimizer whose true depth is 40 reads back as 200. Counting a quarter of them drops that floor
+// to about 48 and the same minimizer reads back as 77. The median depth the profile is built on
+// falls with it, which is why this change moves estimates. A quarter of a read is still hundreds
+// of minimizers to take a median over, so the per-read depth loses little.
+//
+// A smaller fraction would go further, at the cost of short reads: a 500 base read has around a
+// hundred minimizers and an eighth of that is thin. #36 refits this against the full benchmark.
+const MINIMIZER_SAMPLE_SHIFT: u32 = 2;
+/// Salt for the hash that both draws the minimizer sample and orders [`DistinctSample`].
+///
+/// Sharing one hash is what keeps the two consistent. The sample is the minimizers whose hash falls
+/// below a threshold and [`DistinctSample`] keeps the smallest hashes, so as long as the gate keeps
+/// at least [`DISTINCT_SAMPLE_SIZE`] of them the bottom-k sample is the same set it would have been
+/// had the gate never been there. Every input a genome is worth estimating from clears that by
+/// orders of magnitude. An input that does not hands the quantile a sample the gate has shrunk, and
+/// one small enough to fall under [`MIN_DISTINCT_MINIMIZERS`] goes unassessed where it once got a
+/// verdict.
+const SAMPLE_SALT: u64 = 0x243f_6a88_85a3_08d3;
+/// Salt for the hash that places a minimizer in the sketch, independent of [`SAMPLE_SALT`].
+const SKETCH_SALT: u64 = 0x9e37_79b9_7f4a_7c15;
+// Every counter a minimizer touches sits in one 64-byte block, so a lookup that misses cache misses
+// once rather than SKETCH_LANES times. The block is divided into lanes and one counter is drawn
+// from each, which keeps the counters distinct; four independent draws over sixteen shared counters
+// would repeat one about a third of the time and waste the probe.
+const SKETCH_LANES: usize = 4;
+const SKETCH_LANE_WIDTH: usize = 4;
+const SKETCH_BLOCK_COUNTERS: usize = SKETCH_LANES * SKETCH_LANE_WIDTH;
+// 2^18 blocks of sixteen u32 counters is the same 16 MB table, and the same 4,194,304 counters,
+// that four rows of 2^20 gave. Only where the counters sit has changed.
+//
+// Sharing one block does cost a little accuracy, because two minimizers that collide there collide
+// in a correlated way rather than independently per row. Simulated at the load a gigabase of long
+// reads puts on the table, a minimizer of true count 40 reads back with mean 201 from four
+// independent rows and 205 from blocks, and the 99.9th percentile moves from 258 to 289. The gate
+// above is what pays for that and more: at a quarter of the load the same minimizer reads back at
+// 82. Shrinking the table would make it cache resident and hand the rest of that back.
+const SKETCH_BLOCKS: usize = 1 << 18;
+const SKETCH_BLOCK_BITS: u32 = SKETCH_BLOCKS.trailing_zeros();
+const SKETCH_LANE_BITS: u32 = SKETCH_LANE_WIDTH.trailing_zeros();
+// Both the bit masks and the shifts above assume powers of two, and one hash has to supply the
+// block index and every lane's counter index.
+const _: () = assert!(SKETCH_BLOCKS.is_power_of_two() && SKETCH_LANE_WIDTH.is_power_of_two());
+const _: () = assert!(SKETCH_BLOCK_BITS + SKETCH_LANES as u32 * SKETCH_LANE_BITS <= 64);
+// A shift of zero would ask for a shift by the full width of the hash.
+const _: () = assert!(MINIMIZER_SAMPLE_SHIFT > 0 && MINIMIZER_SAMPLE_SHIFT < u64::BITS);
 // Retain at most 2^16 distinct minimizers to bound the quantile calculation.
 const DISTINCT_SAMPLE_SIZE: usize = 1 << 16;
 const MIN_DISTINCT_MINIMIZERS: usize = 128;
@@ -89,7 +140,7 @@ pub(crate) struct DepthSkewDetector {
     sample: DistinctSample,
     positions: Vec<u32>,
     sampled_records: usize,
-    observed_minimizers: usize,
+    sketched_minimizers: usize,
 }
 
 impl DepthSkewDetector {
@@ -101,7 +152,7 @@ impl DepthSkewDetector {
             sample: DistinctSample::new(DISTINCT_SAMPLE_SIZE),
             positions: Vec::new(),
             sampled_records: 0,
-            observed_minimizers: 0,
+            sketched_minimizers: 0,
         }
     }
 
@@ -117,18 +168,18 @@ impl DepthSkewDetector {
         self.sampled_records += 1;
         let sketch = &self.sketch;
         let sample = &mut self.sample;
-        let observed = &mut self.observed_minimizers;
-        for_each_minimizer(sequence, &mut self.positions, |value| {
+        let sketched = &mut self.sketched_minimizers;
+        for_each_sampled_minimizer(sequence, &mut self.positions, |value| {
             sketch.increment(value);
             sample.observe(value);
-            *observed += 1;
+            *sketched += 1;
         });
     }
 
     pub(crate) fn finish(self) -> DepthDetection {
         debug!(
-            "Depth detection drew {} minimizers from {} sampled reads",
-            self.observed_minimizers, self.sampled_records
+            "Depth detection sketched {} minimizers from {} sampled reads",
+            self.sketched_minimizers, self.sampled_records
         );
         DepthDetection {
             report: depth_skew_report(&self.sketch, &self.sample.keys, self.sampled_records),
@@ -154,7 +205,7 @@ pub(crate) struct DepthDetection {
     pub(crate) sample: DistinctSample,
 }
 
-/// Count every minimizer of every read, in parallel, and reduce that to a depth profile.
+/// Count every sampled minimizer of every read, in parallel, and reduce that to a depth profile.
 ///
 /// This is the expensive pass, so it only runs once normalization is going to happen. Nothing
 /// here draws a random number and sketch increments commute, so the profile does not depend on
@@ -183,7 +234,7 @@ pub(crate) fn profile(
                     let mut sample = draw_sample.then(|| DistinctSample::new(DISTINCT_SAMPLE_SIZE));
                     for batch in receiver {
                         for sequence in &batch {
-                            for_each_minimizer(sequence, &mut positions, |value| {
+                            for_each_sampled_minimizer(sequence, &mut positions, |value| {
                                 sketch.increment(value);
                                 if let Some(sample) = &mut sample {
                                     sample.observe(value);
@@ -261,10 +312,16 @@ pub(crate) fn profile(
     })
 }
 
-/// Feed every canonical minimizer of `sequence` to `observe`.
+/// Feed the sampled canonical minimizers of `sequence` to `observe`.
 ///
 /// A run of non-ACGT bases splits the read; a piece too short to hold a window has no minimizers.
-fn for_each_minimizer(sequence: &[u8], positions: &mut Vec<u32>, mut observe: impl FnMut(u64)) {
+/// Of the minimizers that remain, only the sampled fraction is passed on, so the pass that builds
+/// the sketch and the pass that reads it agree on which minimizers exist.
+fn for_each_sampled_minimizer(
+    sequence: &[u8],
+    positions: &mut Vec<u32>,
+    mut observe: impl FnMut(u64),
+) {
     for segment in sequence
         .split(|base| !matches!(base, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
     {
@@ -276,9 +333,21 @@ fn for_each_minimizer(sequence: &[u8], positions: &mut Vec<u32>, mut observe: im
         let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
             .run(AsciiSeq(segment), positions);
         for value in minimizers.values_u64() {
-            observe(value);
+            if is_sampled(value) {
+                observe(value);
+            }
         }
     }
+}
+
+/// The hash that both draws the minimizer sample and orders [`DistinctSample`].
+fn sample_hash(value: u64) -> u64 {
+    mix64(value ^ SAMPLE_SALT)
+}
+
+/// Whether this minimizer is one of the one in `2^`[`MINIMIZER_SAMPLE_SHIFT`] the sketch counts.
+fn is_sampled(value: u64) -> bool {
+    sample_hash(value) >> (u64::BITS - MINIMIZER_SAMPLE_SHIFT) == 0
 }
 
 fn seeded_rng(seed: Option<u64>) -> StdRng {
@@ -330,7 +399,7 @@ impl DepthProfile {
         let sketch = &self.sketch;
         let counts = &mut self.counts;
         counts.clear();
-        for_each_minimizer(sequence, &mut self.positions, |value| {
+        for_each_sampled_minimizer(sequence, &mut self.positions, |value| {
             counts.push(sketch.estimate(value));
         });
 
@@ -348,17 +417,27 @@ impl DepthProfile {
     }
 }
 
+/// One cache line of counters.
+#[repr(C, align(64))]
+struct SketchBlock([AtomicU32; SKETCH_BLOCK_COUNTERS]);
+
 struct CountMinSketch {
-    counters: Box<[AtomicU32]>,
+    blocks: Box<[SketchBlock]>,
 }
 
 impl CountMinSketch {
     fn new() -> Self {
         Self {
-            counters: (0..SKETCH_ROWS * SKETCH_WIDTH)
-                .map(|_| AtomicU32::new(0))
+            blocks: (0..SKETCH_BLOCKS)
+                .map(|_| SketchBlock(std::array::from_fn(|_| AtomicU32::new(0))))
                 .collect(),
         }
+    }
+
+    /// The block this minimizer's counters live in, and which counter of it each lane holds.
+    fn counters(&self, value: u64) -> (&SketchBlock, [usize; SKETCH_LANES]) {
+        let (block, lanes) = sketch_slots(value);
+        (&self.blocks[block], lanes)
     }
 
     /// Add one to each of the counters this minimizer maps to.
@@ -370,8 +449,9 @@ impl CountMinSketch {
     /// The loop is written out because `fetch_update` is deprecated on newer toolchains and its
     /// replacement does not exist on the one this crate supports.
     fn increment(&self, value: u64) {
-        for row in 0..SKETCH_ROWS {
-            let counter = &self.counters[row * SKETCH_WIDTH + sketch_index(value, row)];
+        let (block, lanes) = self.counters(value);
+        for slot in lanes {
+            let counter = &block.0[slot];
             let mut count = counter.load(Ordering::Relaxed);
             while count < u32::MAX {
                 match counter.compare_exchange_weak(
@@ -388,18 +468,25 @@ impl CountMinSketch {
     }
 
     fn estimate(&self, value: u64) -> u32 {
-        (0..SKETCH_ROWS)
-            .map(|row| {
-                self.counters[row * SKETCH_WIDTH + sketch_index(value, row)].load(Ordering::Relaxed)
-            })
+        let (block, lanes) = self.counters(value);
+        lanes
+            .iter()
+            .map(|slot| block.0[*slot].load(Ordering::Relaxed))
             .min()
-            .unwrap_or_default()
+            .expect("every minimizer has a counter in every lane")
     }
 }
 
-fn sketch_index(value: u64, row: usize) -> usize {
-    let row_seed = (row as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    (mix64(value ^ row_seed) as usize) & (SKETCH_WIDTH - 1)
+/// Where this minimizer's counters live: which block, and which counter within each of its lanes.
+fn sketch_slots(value: u64) -> (usize, [usize; SKETCH_LANES]) {
+    let hash = mix64(value ^ SKETCH_SALT);
+    let block = (hash as usize) & (SKETCH_BLOCKS - 1);
+    let mut lanes = [0; SKETCH_LANES];
+    for (lane, slot) in lanes.iter_mut().enumerate() {
+        let bits = SKETCH_BLOCK_BITS + lane as u32 * SKETCH_LANE_BITS;
+        *slot = lane * SKETCH_LANE_WIDTH + ((hash >> bits) as usize & (SKETCH_LANE_WIDTH - 1));
+    }
+    (block, lanes)
 }
 
 fn mix64(mut value: u64) -> u64 {
@@ -432,7 +519,7 @@ impl DistinctSample {
             return;
         }
 
-        let entry = (mix64(value ^ 0x243f_6a88_85a3_08d3), value);
+        let entry = (sample_hash(value), value);
         if self.entries.len() < self.capacity {
             self.entries.push(entry);
             self.keys.insert(value);
@@ -460,6 +547,17 @@ mod tests {
                 b"ACGT"[((state >> 32) & 3) as usize]
             })
             .collect()
+    }
+
+    /// The minimizer sample a detection pass over `input` leaves behind.
+    fn detect(input: &std::path::Path) -> DistinctSample {
+        let mut detector = DepthSkewDetector::sampling_all(Some(3));
+        io::count_records(input, |sequence| {
+            detector.observe(sequence);
+            Ok(())
+        })
+        .unwrap();
+        detector.finish().sample
     }
 
     /// A file of `records` reads of `length` bases, each read distinct from the others.
@@ -527,11 +625,11 @@ mod tests {
         }
 
         let sampled = detector.sampled_records;
-        let drawn = detector.observed_minimizers;
+        let drawn = detector.sketched_minimizers;
         let per_read = {
             let mut one = DepthSkewDetector::sampling_all(Some(42));
             one.observe(&read);
-            one.observed_minimizers
+            one.sketched_minimizers
         };
 
         assert!(per_read > 0, "the test read has no minimizers");
@@ -544,6 +642,90 @@ mod tests {
             sampled * per_read,
             "minimizers were drawn from reads outside the detection sample"
         );
+    }
+
+    /// The sketch may overestimate a minimizer, never underestimate it. Drawing every counter from
+    /// one block correlates the collisions, so this is worth pinning rather than assuming.
+    #[test]
+    fn the_sketch_never_undercounts() {
+        let sketch = CountMinSketch::new();
+        let values: Vec<u64> = (0..50_000u64).map(mix64).collect();
+        for (index, value) in values.iter().enumerate() {
+            for _ in 0..=index % 7 {
+                sketch.increment(*value);
+            }
+        }
+
+        for (index, value) in values.iter().enumerate() {
+            let truth = (index % 7) as u32 + 1;
+            assert!(
+                sketch.estimate(*value) >= truth,
+                "estimate for value {index} fell below its true count of {truth}"
+            );
+        }
+    }
+
+    /// One block is one cache line, and every counter a minimizer touches has to be inside it and
+    /// distinct from the others. A repeated counter would spend a probe on an answer already held.
+    #[test]
+    fn a_minimizer_touches_one_cache_line_and_no_counter_twice() {
+        assert_eq!(std::mem::size_of::<SketchBlock>(), 64);
+        assert_eq!(std::mem::align_of::<SketchBlock>(), 64);
+
+        for index in 0..20_000u64 {
+            let (block, lanes) = sketch_slots(mix64(index));
+            assert!(block < SKETCH_BLOCKS);
+            assert!(lanes.iter().all(|slot| *slot < SKETCH_BLOCK_COUNTERS));
+
+            let mut distinct = lanes.to_vec();
+            distinct.sort_unstable();
+            distinct.dedup();
+            assert_eq!(
+                distinct.len(),
+                SKETCH_LANES,
+                "lanes {lanes:?} repeat a counter"
+            );
+        }
+    }
+
+    #[test]
+    fn the_gate_keeps_about_one_minimizer_in_four() {
+        let offered = 100_000;
+        let kept = (0..offered as u64)
+            .filter(|index| is_sampled(mix64(*index)))
+            .count();
+        let expected = offered / (1 << MINIMIZER_SAMPLE_SHIFT);
+
+        assert!(
+            (expected * 9 / 10..=expected * 11 / 10).contains(&kept),
+            "kept {kept} of {offered}, expected about {expected}"
+        );
+    }
+
+    /// The detector's score and the profile's median depth are both read off the bottom-k sample,
+    /// so sampling minimizers must not disturb it. Sharing one hash with the gate is what buys
+    /// that: the smallest hashes are exactly the ones the gate keeps.
+    #[test]
+    fn sampling_minimizers_leaves_the_bottom_k_sample_alone() {
+        let capacity = 1 << 10;
+        let mut from_sample = DistinctSample::new(capacity);
+        let mut from_everything = DistinctSample::new(capacity);
+        let mut kept = 0;
+
+        for index in 0..200_000u64 {
+            let value = mix64(index);
+            from_everything.observe(value);
+            if is_sampled(value) {
+                from_sample.observe(value);
+                kept += 1;
+            }
+        }
+
+        assert!(
+            kept > capacity,
+            "the gate kept {kept}, too few to fill the sample"
+        );
+        assert_eq!(from_sample.keys, from_everything.keys);
     }
 
     #[test]
@@ -570,15 +752,8 @@ mod tests {
     #[test]
     fn profiling_scores_reads_against_the_detector_sample() {
         let input = fasta(200, 2_000);
-        let mut detector = DepthSkewDetector::sampling_all(Some(3));
-        io::count_records(input.path(), |sequence| {
-            detector.observe(sequence);
-            Ok(())
-        })
-        .unwrap();
-        let detection = detector.finish();
 
-        let profile = profile(input.path(), 2, Some(detection.sample)).unwrap();
+        let profile = profile(input.path(), 2, Some(detect(input.path()))).unwrap();
 
         assert!(profile.median_count >= 1);
     }
