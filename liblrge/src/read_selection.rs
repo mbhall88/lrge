@@ -809,17 +809,20 @@ mod tests {
         );
     }
 
+    /// One read in a hundred of a thousand is about ten, too few to place a percentile, so the
+    /// selector's detection pass tops the sample up to the floor.
     #[test]
     fn read_selector_samples_records_for_depth_skew_detection() {
+        let records = 1_000;
         let mut input = tempfile::NamedTempFile::new().unwrap();
-        for index in 0..1_000 {
+        for index in 0..records {
             writeln!(input, ">read{index}\nACGTACGTACGTACGTACGTACGTACGT").unwrap();
         }
 
         let selector = ReadSelector::new(input.path(), Some(42), Normalization::Auto).unwrap();
         let sampled = selector.depth_skew().sampled_records;
 
-        assert!((3..=20).contains(&sampled), "sampled {sampled} reads");
+        assert_eq!(sampled, crate::depth_skew::DETECTION_READ_FLOOR);
     }
 
     #[test]
