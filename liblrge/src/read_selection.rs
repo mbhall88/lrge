@@ -154,18 +154,25 @@ impl ReadSelector {
         Ok(())
     }
 
+    /// Select the reads each output asked for and write them.
+    ///
+    /// The work is a method of its own so that one timer covers every way out of it, the depth
+    /// profile the normalized paths build included.
     pub(crate) fn write_selected(
         &mut self,
         outputs: &[(&Path, usize)],
         weights: Option<&[f64]>,
     ) -> Result<SelectionResult> {
         let started = Instant::now();
-        let selection = self.select(outputs, weights)?;
-        debug!("Selected and wrote the reads in {:.2?}", started.elapsed());
+        let selection = self.select_and_write(outputs, weights)?;
+        debug!(
+            "Selected and wrote the reads in {:.2?}, the depth profile above included",
+            started.elapsed()
+        );
         Ok(selection)
     }
 
-    fn select(
+    fn select_and_write(
         &mut self,
         outputs: &[(&Path, usize)],
         weights: Option<&[f64]>,
@@ -301,7 +308,7 @@ impl ReadSelector {
         let mut peak_buffer_bytes = 0_u64;
 
         depth_skew::score_reads(&self.input, profile, self.threads, |input_index, read| {
-            if let Some(slot) = sampler.offer(input_index, read.probability) {
+            if let Some(slot) = sampler.offer(input_index, read.retention_probability) {
                 // The scoring pass already owns a copy of the read, so buffering it takes the
                 // buffers it holds rather than making another pair.
                 let record = BufferedRecord {
@@ -370,7 +377,7 @@ impl ReadSelector {
         let mut sampler = NormalizedSampler::new(capacity, self.seed);
 
         depth_skew::score_reads(&self.input, profile, self.threads, |input_index, read| {
-            sampler.offer(input_index, read.probability);
+            sampler.offer(input_index, read.retention_probability);
         })?;
 
         let order = sampler.finish();
