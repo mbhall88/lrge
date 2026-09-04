@@ -630,6 +630,10 @@ pub(crate) fn score_reads(
                 index += 1;
             }
         }
+        // A worker the loop above stopped short of may still be holding a finished batch it cannot
+        // put down. Letting go of every receiver frees it, and freeing it frees the reader waiting
+        // to hand it more, so the join below has something to report rather than something to wait
+        // on.
         drop(scored);
 
         reader.join().expect("read scoring thread panicked")
