@@ -171,6 +171,9 @@ pub enum Normalization {
     #[default]
     Auto,
     /// Normalize every input without consulting the skew verdict.
+    ///
+    /// Detection still runs, because what normalization measures depth against is read off the
+    /// minimizers detection samples. The verdict is what this mode ignores, not the work.
     Always,
     /// Disable depth-skew detection and normalization.
     Never,

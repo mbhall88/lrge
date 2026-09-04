@@ -155,6 +155,11 @@ impl fmt::Display for DepthSkewReport {
 
 /// Decides whether an input is depth skewed, from a small sample of its reads.
 ///
+/// The sample it leaves behind is the other half of what it is for. [`profile`] reads the whole
+/// input's counts for those minimizers and normalizes against their median, and a sample drawn
+/// from a hundredth of the reads is what makes that median a coverage depth: see
+/// [`DepthDetection::sample`]. So every run that normalizes runs this, forced or not.
+///
 /// This rides along with the pass that counts the records, so it is the only depth work an
 /// unskewed run pays for. It draws minimizers from roughly one read in
 /// [`READ_SAMPLE_DENOMINATOR`] and skips the rest entirely: the reads it does not sample cost it
@@ -277,9 +282,14 @@ impl DepthSkewDetector {
 /// What the detection pass leaves behind.
 pub(crate) struct DepthDetection {
     pub(crate) report: DepthSkewReport,
-    /// The minimizers the detector sampled. [`profile`] scores these against the full counts to
-    /// find the input's median depth, so keeping them means the profiling pass does not have to
-    /// draw a sample of its own.
+    /// The minimizers the detector sampled, and the only sample the input's median depth may be
+    /// taken over.
+    ///
+    /// Drawing one from every minimizer of every read instead draws it from a population
+    /// sequencing error dominates: nearly every distinct minimizer of a long-read set is seen in
+    /// one read only, so the median count over them is the sketch's noise floor rather than the
+    /// input's depth. The hundredth of the reads this was drawn from holds few enough distinct
+    /// minimizers that the ones the genome repeats are the majority of them.
     pub(crate) sample: DistinctSample,
 }
 
@@ -289,20 +299,21 @@ pub(crate) struct DepthDetection {
 /// here draws a random number and sketch increments commute, so the profile does not depend on
 /// how the work was divided: the same input gives the same profile at any thread count.
 ///
-/// `sample` is the minimizer sample the detector already drew. When it is `None` — a forced
-/// normalization, which never runs the detector — the pass draws its own from every read.
+/// `sample` is the minimizer sample the detector drew. The counts this pass reads are the whole
+/// input's, but which minimizers it reads them for is decided by the reads detection saw, and that
+/// is what makes the median below a coverage depth rather than the sketch's noise floor. See
+/// [`DepthSkewDetector`].
 pub(crate) fn profile(
     input: &Path,
     threads: usize,
-    sample: Option<DistinctSample>,
+    sample: DistinctSample,
 ) -> crate::Result<DepthProfile> {
     let threads = threads.max(1);
     debug!("Profiling read depth across the input on {threads} thread(s)...");
     let started = Instant::now();
     let sketch = CountMinSketch::new();
-    let draw_sample = sample.is_none();
 
-    let (read_result, drawn) = std::thread::scope(|scope| {
+    let read_result = std::thread::scope(|scope| {
         let (sender, receiver) = channel::bounded::<Vec<Vec<u8>>>(2 * threads);
         let workers: Vec<_> = (0..threads)
             .map(|_| {
@@ -310,18 +321,13 @@ pub(crate) fn profile(
                 let sketch = &sketch;
                 scope.spawn(move || {
                     let mut scratch = MinimizerScratch::default();
-                    let mut sample = draw_sample.then(|| DistinctSample::new(DISTINCT_SAMPLE_SIZE));
                     for batch in receiver {
                         for sequence in &batch {
                             scratch.for_each_sampled_minimizer(sequence, |value| {
                                 sketch.increment(value);
-                                if let Some(sample) = &mut sample {
-                                    sample.observe(value);
-                                }
                             });
                         }
                     }
-                    sample
                 })
             })
             .collect();
@@ -344,28 +350,12 @@ pub(crate) fn profile(
         }
         drop(sender);
 
-        let drawn: Vec<_> = workers
-            .into_iter()
-            .map(|worker| worker.join().expect("depth profiling thread panicked"))
-            .collect();
-        (read_result, drawn)
+        for worker in workers {
+            worker.join().expect("depth profiling thread panicked");
+        }
+        read_result
     });
     read_result?;
-
-    let sample = match sample {
-        Some(sample) => sample,
-        // The smallest hashes of a union are the smallest hashes of its parts, so merging the
-        // workers' samples gives the same minimizers however the reads were divided up.
-        None => {
-            let mut merged = DistinctSample::new(DISTINCT_SAMPLE_SIZE);
-            for worker_sample in drawn.into_iter().flatten() {
-                for value in worker_sample.keys {
-                    merged.observe(value);
-                }
-            }
-            merged
-        }
-    };
 
     let mut counts: Vec<u32> = sample
         .keys
@@ -1318,15 +1308,14 @@ mod tests {
 
     #[test]
     fn profile_does_not_depend_on_the_thread_count() {
-        // Large enough to fill several batches and to push the minimizer sample past its capacity,
-        // so the workers' samples actually have to be merged.
+        // Large enough to fill several batches, so the reads really are divided up differently.
         let input = fasta(800, 5_000);
         let reads: Vec<Vec<u8>> = (0..800)
             .map(|index| pseudo_random_dna(5_000, index + 1))
             .collect();
 
-        let single = profile(input.path(), 1, None).unwrap();
-        let many = profile(input.path(), 4, None).unwrap();
+        let single = profile(input.path(), 1, detect(input.path())).unwrap();
+        let many = profile(input.path(), 4, detect(input.path())).unwrap();
 
         assert_eq!(single.median_count, many.median_count);
         let mut single_scorer = single.scorer();
@@ -1343,7 +1332,7 @@ mod tests {
     fn profiling_scores_reads_against_the_detector_sample() {
         let input = fasta(200, 2_000);
 
-        let profile = profile(input.path(), 2, Some(detect(input.path()))).unwrap();
+        let profile = profile(input.path(), 2, detect(input.path())).unwrap();
 
         assert!(profile.median_count >= 1);
     }
@@ -1375,7 +1364,7 @@ mod tests {
     #[test]
     fn scoring_reads_in_parallel_matches_a_sequential_scorer() {
         let input = uneven_fasta();
-        let profile = profile(input.path(), 1, None).unwrap();
+        let profile = profile(input.path(), 1, detect(input.path())).unwrap();
         let mut scorer = profile.scorer();
         let mut expected = Vec::new();
         io::iter_records(input.path(), |id, sequence| {
