@@ -8,7 +8,7 @@ use crossbeam_channel as channel;
 use log::debug;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use simd_minimizers::packed_seq::AsciiSeq;
+use simd_minimizers::packed_seq::{PackedSeqVec, SeqVec};
 
 use crate::io;
 
@@ -179,7 +179,7 @@ pub(crate) struct DepthSkewDetector {
     read_floor: usize,
     /// Reads the draw passed over, to top the sample up from if it comes up short.
     reserve: ReadReserve,
-    positions: Vec<u32>,
+    scratch: MinimizerScratch,
     observed_records: usize,
     sampled_records: usize,
     sketched_minimizers: usize,
@@ -202,7 +202,7 @@ impl DepthSkewDetector {
             sample: DistinctSample::new(DISTINCT_SAMPLE_SIZE),
             read_floor: at_least,
             reserve: ReadReserve::new(at_least, reserve_salt(seed)),
-            positions: Vec::new(),
+            scratch: MinimizerScratch::default(),
             observed_records: 0,
             sampled_records: 0,
             sketched_minimizers: 0,
@@ -235,7 +235,7 @@ impl DepthSkewDetector {
         let sketch = &self.sketch;
         let sample = &mut self.sample;
         let sketched = &mut self.sketched_minimizers;
-        for_each_sampled_minimizer(sequence, &mut self.positions, |value| {
+        self.scratch.for_each_sampled_minimizer(sequence, |value| {
             sketch.increment(value);
             sample.observe(value);
             *sketched += 1;
@@ -309,11 +309,11 @@ pub(crate) fn profile(
                 let receiver = receiver.clone();
                 let sketch = &sketch;
                 scope.spawn(move || {
-                    let mut positions = Vec::new();
+                    let mut scratch = MinimizerScratch::default();
                     let mut sample = draw_sample.then(|| DistinctSample::new(DISTINCT_SAMPLE_SIZE));
                     for batch in receiver {
                         for sequence in &batch {
-                            for_each_sampled_minimizer(sequence, &mut positions, |value| {
+                            scratch.for_each_sampled_minimizer(sequence, |value| {
                                 sketch.increment(value);
                                 if let Some(sample) = &mut sample {
                                     sample.observe(value);
@@ -390,32 +390,63 @@ pub(crate) fn profile(
     })
 }
 
-/// Feed the sampled canonical minimizers of `sequence` to `observe`.
+/// The buffers a pass reuses to walk the minimizers of one read after another.
 ///
-/// A run of non-ACGT bases splits the read; a piece too short to hold a window has no minimizers.
-/// Of the minimizers that remain, only the sampled fraction is passed on, so the pass that builds
-/// the sketch and the pass that reads it agree on which minimizers exist.
-fn for_each_sampled_minimizer(
-    sequence: &[u8],
-    positions: &mut Vec<u32>,
-    mut observe: impl FnMut(u64),
-) {
-    for segment in sequence
-        .split(|base| !matches!(base, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
-    {
-        if segment.len() < KMER_LENGTH + WINDOW_WIDTH - 1 {
-            continue;
-        }
+/// Both buffers are scratch, and reusing them from read to read is most of why walking every read
+/// of an input is affordable at all. They live together because a walk needs both, so a pass holds
+/// one of these rather than two loose buffers, and each thread of a parallel pass takes its own.
+#[derive(Default)]
+struct MinimizerScratch {
+    /// Where `simd_minimizers` puts the positions it finds.
+    positions: Vec<u32>,
+    /// The piece of read being walked, two bits to a base.
+    packed: PackedSeqVec,
+}
 
-        positions.clear();
-        let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
-            .run(AsciiSeq(segment), positions);
-        for value in minimizers.values_u64() {
-            if is_sampled(value) {
-                observe(value);
+impl MinimizerScratch {
+    /// Feed the sampled canonical minimizers of `sequence` to `observe`.
+    ///
+    /// Only the sampled fraction of the minimizers is passed on, so the pass that builds the
+    /// sketch and the pass that reads it agree on which minimizers exist.
+    ///
+    /// Each piece is packed before it is walked. Packing reads the piece once and writes a quarter
+    /// as many bytes, after which recovering a minimizer's value costs a load, a shift and a mask.
+    /// Walking the ASCII bytes instead leaves every value to be re-read from the k-mer and packed
+    /// a base at a time, forward and reverse-complement, and a base belongs to several minimizers.
+    /// That is where most of a normalizing run used to go. `simd_minimizers` asks for this: its
+    /// input-types documentation says ASCII DNA should usually be converted to a `PackedSeqVec`
+    /// first.
+    fn for_each_sampled_minimizer(&mut self, sequence: &[u8], mut observe: impl FnMut(u64)) {
+        // Only the pieces a walk will use are packed, so the non-ACGT runs a read is split by, and
+        // the pieces too short to hold a window, cost nothing to pack.
+        for segment in walkable_segments(sequence) {
+            // `push_ascii` maps whatever byte it is given into two bits without complaint, and
+            // `as_slice` indexes past the packed bases into padding the vector only has once
+            // something has been pushed. Both are safe here only because the segments are non-empty
+            // and hold nothing but ACGT.
+            self.packed.clear();
+            self.packed.push_ascii(segment);
+            self.positions.clear();
+            let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
+                .run(self.packed.as_slice(), &mut self.positions);
+            for value in minimizers.values_u64() {
+                if is_sampled(value) {
+                    observe(value);
+                }
             }
         }
     }
+}
+
+/// The pieces of `sequence` a minimizer walk has anything to say about.
+///
+/// A run of non-ACGT bases splits the read, because a k-mer that spans one has no two-bit
+/// encoding. A piece too short to hold a window has no minimizers and is dropped, which leaves
+/// every piece that comes back non-empty and ACGT throughout.
+fn walkable_segments(sequence: &[u8]) -> impl Iterator<Item = &[u8]> {
+    sequence
+        .split(|base| !matches!(base, b'A' | b'C' | b'G' | b'T' | b'a' | b'c' | b'g' | b't'))
+        .filter(|segment| segment.len() >= KMER_LENGTH + WINDOW_WIDTH - 1)
 }
 
 /// The hash that both draws the minimizer sample and orders [`DistinctSample`].
@@ -475,7 +506,7 @@ impl DepthProfile {
     pub(crate) fn scorer(&self) -> RetentionScorer<'_> {
         RetentionScorer {
             profile: self,
-            positions: Vec::new(),
+            scratch: MinimizerScratch::default(),
             counts: Vec::new(),
         }
     }
@@ -483,12 +514,11 @@ impl DepthProfile {
 
 /// Scores reads against a finished [`DepthProfile`].
 ///
-/// Scoring a read needs scratch to hold its minimizer positions and their counts, and reusing that
-/// across reads is most of why the pass is affordable. The scratch lives here rather than on the
-/// profile so that threads scoring against one profile each take their own.
+/// The scratch a scoring pass reuses lives here rather than on the profile, so that threads
+/// scoring against one profile each take their own.
 pub(crate) struct RetentionScorer<'a> {
     profile: &'a DepthProfile,
-    positions: Vec<u32>,
+    scratch: MinimizerScratch,
     counts: Vec<u32>,
 }
 
@@ -498,7 +528,7 @@ impl RetentionScorer<'_> {
         let sketch = &self.profile.sketch;
         let counts = &mut self.counts;
         counts.clear();
-        for_each_sampled_minimizer(sequence, &mut self.positions, |value| {
+        self.scratch.for_each_sampled_minimizer(sequence, |value| {
             counts.push(sketch.estimate(value));
         });
 
@@ -1062,6 +1092,90 @@ mod tests {
                 "lanes {lanes:?} repeat a counter"
             );
         }
+    }
+
+    /// The minimizer values a walk over the ASCII bytes of `sequence` would yield.
+    ///
+    /// This is the shape the pass had before it packed the read, kept here as the reference the
+    /// packed walk is measured against. It splits the read with the same [`walkable_segments`] the
+    /// pass does, so the two differ in how a value is read back and in nothing else.
+    fn ascii_minimizer_values(sequence: &[u8]) -> Vec<u64> {
+        use simd_minimizers::packed_seq::AsciiSeq;
+
+        let mut values = Vec::new();
+        let mut positions = Vec::new();
+        for segment in walkable_segments(sequence) {
+            positions.clear();
+            let minimizers = simd_minimizers::canonical_minimizers(KMER_LENGTH, WINDOW_WIDTH)
+                .run(AsciiSeq(segment), &mut positions);
+            values.extend(minimizers.values_u64().filter(|value| is_sampled(*value)));
+        }
+        values
+    }
+
+    /// The minimizer values `scratch` yields for `sequence`.
+    fn packed_minimizer_values(scratch: &mut MinimizerScratch, sequence: &[u8]) -> Vec<u64> {
+        let mut values = Vec::new();
+        scratch.for_each_sampled_minimizer(sequence, |value| values.push(value));
+        values
+    }
+
+    /// Reading a minimizer's value out of a packed copy of the read has to give the value reading
+    /// it out of the ASCII bytes gives. A value that moves lands in a different counter, and every
+    /// count the profile is built from moves with it.
+    ///
+    /// The cases cover what packing has to get right and a walk over ASCII never had to: a length
+    /// that is not a whole number of packed bytes, lowercase bases, and reads that non-ACGT runs
+    /// split into pieces. Some of those pieces are too short to hold a window and are skipped, and
+    /// skipping one must not disturb the pieces after it. One scratch walks every case, in an
+    /// order that puts shorter reads after longer ones, because the buffers a walk leaves behind
+    /// are the next walk's.
+    #[test]
+    fn packing_a_read_leaves_its_minimizer_values_alone() {
+        let mut cases: Vec<(String, Vec<u8>)> = Vec::new();
+
+        // Four bases share a packed byte, so a read of each length modulo four packs a different
+        // number of bases into its last one.
+        for length in 4_000..4_004 {
+            cases.push((format!("{length} bases"), pseudo_random_dna(length, 5)));
+        }
+
+        let read = pseudo_random_dna(3_000, 6);
+        cases.push(("lowercase".to_string(), read.to_ascii_lowercase()));
+        cases.push(("uppercase".to_string(), read));
+
+        let head = pseudo_random_dna(1_500, 7);
+        let tail = pseudo_random_dna(1_500, 8);
+        let stub = pseudo_random_dna(KMER_LENGTH + WINDOW_WIDTH - 2, 9);
+        let mut split = head.clone();
+        split.extend_from_slice(b"NNNNN");
+        split.extend_from_slice(&stub);
+        split.push(b'N');
+        split.extend_from_slice(&tail);
+        cases.push(("split by an N run, around a stub".to_string(), split));
+
+        let mut edged = vec![b'N'];
+        edged.extend_from_slice(&head);
+        edged.push(b'n');
+        cases.push(("N at each end".to_string(), edged));
+
+        cases.push(("too short for a window".to_string(), stub));
+        cases.push(("empty".to_string(), Vec::new()));
+
+        let mut scratch = MinimizerScratch::default();
+        let mut compared = 0;
+        for (name, sequence) in cases {
+            let expected = ascii_minimizer_values(&sequence);
+            compared += expected.len();
+            assert_eq!(
+                packed_minimizer_values(&mut scratch, &sequence),
+                expected,
+                "{name} gave different minimizer values packed than as ASCII"
+            );
+        }
+
+        // Two walks that both find nothing agree on nothing, which would prove nothing.
+        assert!(compared > 100, "only {compared} values were compared");
     }
 
     #[test]
