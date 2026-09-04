@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use log::{debug, info, warn};
 use rand::rngs::StdRng;
@@ -48,6 +49,7 @@ impl ReadSelector {
         normalization: Normalization,
     ) -> Result<Self> {
         let input = input.as_ref().to_path_buf();
+        let started = Instant::now();
         let mut total_bases = 0_usize;
         // Forcing or refusing normalization makes the verdict irrelevant, so those runs do no
         // depth work in the counting pass at all.
@@ -69,6 +71,7 @@ impl ReadSelector {
             }
             None => (DepthSkewReport::not_assessed(), None),
         };
+        debug!("Counted {num_records} reads in {:.2?}", started.elapsed());
 
         Ok(Self {
             input,
@@ -152,6 +155,17 @@ impl ReadSelector {
     }
 
     pub(crate) fn write_selected(
+        &mut self,
+        outputs: &[(&Path, usize)],
+        weights: Option<&[f64]>,
+    ) -> Result<SelectionResult> {
+        let started = Instant::now();
+        let selection = self.select(outputs, weights)?;
+        debug!("Selected and wrote the reads in {:.2?}", started.elapsed());
+        Ok(selection)
+    }
+
+    fn select(
         &mut self,
         outputs: &[(&Path, usize)],
         weights: Option<&[f64]>,
@@ -263,23 +277,21 @@ impl ReadSelector {
 
         // Lending the profile to the writer is what lets them take it as a plain argument, so
         // neither has to restate that normalization cannot run without one.
-        let mut profile = self
+        let profile = self
             .depth_profile
-            .take()
+            .as_ref()
             .expect("ensure_depth_profile built one");
-        let selection = if projected > self.max_read_buffer {
-            self.write_normalized_streamed(&mut profile, outputs, capacity)
+        if projected > self.max_read_buffer {
+            self.write_normalized_streamed(profile, outputs, capacity)
         } else {
-            self.write_normalized_buffered(&mut profile, outputs, capacity)
-        };
-        self.depth_profile = Some(profile);
-        selection
+            self.write_normalized_buffered(profile, outputs, capacity)
+        }
     }
 
     /// Select and buffer the reads in one pass, then write them out.
     fn write_normalized_buffered(
         &self,
-        profile: &mut DepthProfile,
+        profile: &DepthProfile,
         outputs: &[(&Path, usize)],
         capacity: usize,
     ) -> Result<SelectionResult> {
@@ -287,15 +299,15 @@ impl ReadSelector {
         let mut reservoir: Vec<BufferedRecord> = Vec::with_capacity(capacity);
         let mut buffer_bytes = 0_u64;
         let mut peak_buffer_bytes = 0_u64;
-        let mut input_index = 0_usize;
 
-        io::iter_records(&self.input, |id, sequence| {
-            let probability = profile.retention_probability(sequence);
-            if let Some(slot) = sampler.offer(input_index, probability) {
+        depth_skew::score_reads(&self.input, profile, self.threads, |input_index, read| {
+            if let Some(slot) = sampler.offer(input_index, read.probability) {
+                // The scoring pass already owns a copy of the read, so buffering it takes the
+                // buffers it holds rather than making another pair.
                 let record = BufferedRecord {
                     input_index,
-                    id: id.to_vec(),
-                    sequence: sequence.to_vec(),
+                    id: read.id,
+                    sequence: read.sequence,
                 };
                 buffer_bytes += record.buffered_bytes();
                 match slot {
@@ -307,8 +319,6 @@ impl ReadSelector {
                 }
                 peak_buffer_bytes = peak_buffer_bytes.max(buffer_bytes);
             }
-            input_index += 1;
-            Ok(())
         })?;
 
         let order = sampler.finish();
@@ -353,18 +363,14 @@ impl ReadSelector {
     /// in the same order as the buffered path, so a seed picks the same reads either way.
     fn write_normalized_streamed(
         &self,
-        profile: &mut DepthProfile,
+        profile: &DepthProfile,
         outputs: &[(&Path, usize)],
         capacity: usize,
     ) -> Result<SelectionResult> {
         let mut sampler = NormalizedSampler::new(capacity, self.seed);
-        let mut input_index = 0_usize;
 
-        io::iter_records(&self.input, |_, sequence| {
-            let probability = profile.retention_probability(sequence);
-            sampler.offer(input_index, probability);
-            input_index += 1;
-            Ok(())
+        depth_skew::score_reads(&self.input, profile, self.threads, |input_index, read| {
+            sampler.offer(input_index, read.probability);
         })?;
 
         let order = sampler.finish();
@@ -778,35 +784,46 @@ mod tests {
         );
     }
 
+    /// Reads are scored in parallel and sampled sequentially, so a thread count has to be free to
+    /// change without moving what a seed selects. Both normalized paths score every read, so both
+    /// are checked.
     #[test]
     fn a_seed_selects_the_same_reads_at_any_thread_count() {
         let input = skewed_input();
         let tempdir = tempfile::tempdir().unwrap();
-        let one_thread = tempdir.path().join("one.fa");
-        let many_threads = tempdir.path().join("many.fa");
 
-        let mut single = ReadSelector::new(input.path(), Some(42), Normalization::Always)
-            .unwrap()
-            .threads(1);
-        let single_selection = single
-            .write_selected(&[(one_thread.as_path(), 20)], None)
-            .unwrap();
-        let mut many = ReadSelector::new(input.path(), Some(42), Normalization::Always)
-            .unwrap()
-            .threads(4);
-        let many_selection = many
-            .write_selected(&[(many_threads.as_path(), 20)], None)
-            .unwrap();
+        for (path_prefix, cap) in [("buffered", u64::MAX), ("streamed", 0)] {
+            let one_thread = tempdir.path().join(format!("{path_prefix}_one.fa"));
+            let many_threads = tempdir.path().join(format!("{path_prefix}_many.fa"));
 
-        assert!(single_selection.normalized);
-        assert_eq!(
-            single_selection.retained_records,
-            many_selection.retained_records
-        );
-        assert_eq!(
-            std::fs::read(one_thread).unwrap(),
-            std::fs::read(many_threads).unwrap()
-        );
+            let mut single = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+                .unwrap()
+                .threads(1)
+                .max_read_buffer(cap);
+            let single_selection = single
+                .write_selected(&[(one_thread.as_path(), 20)], None)
+                .unwrap();
+            let mut many = ReadSelector::new(input.path(), Some(42), Normalization::Always)
+                .unwrap()
+                .threads(4)
+                .max_read_buffer(cap);
+            let many_selection = many
+                .write_selected(&[(many_threads.as_path(), 20)], None)
+                .unwrap();
+
+            assert!(single_selection.normalized);
+            assert_eq!(single_selection.low_memory, cap == 0);
+            assert_eq!(many_selection.low_memory, cap == 0);
+            assert_eq!(
+                single_selection.retained_records, many_selection.retained_records,
+                "{path_prefix} path"
+            );
+            assert_eq!(
+                std::fs::read(one_thread).unwrap(),
+                std::fs::read(many_threads).unwrap(),
+                "{path_prefix} path"
+            );
+        }
     }
 
     /// One read in a hundred of a thousand is about ten, too few to place a percentile, so the

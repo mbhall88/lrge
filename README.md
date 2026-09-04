@@ -400,8 +400,9 @@ Detection itself is cheap: it draws minimizers from about one read in a hundred 
 On an input too small for that to reach 500 reads it samples more, because below that the verdict
 starts to turn on which reads happened to be drawn rather than on the input.
 Building the full depth profile that normalization needs costs a second pass over the input, so LRGE
-only takes that pass once it has decided to normalize, and the pass uses the thread count given to
-`--threads`. An input with no detected skew therefore costs little more than `--normalize never`.
+only takes that pass once it has decided to normalize. That pass and the scoring of every read
+against the finished profile both use the thread count given to `--threads`. An input with no
+detected skew therefore costs little more than `--normalize never`.
 
 Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
 disable both detection and normalization. A wide reported interval means the per-read estimates
