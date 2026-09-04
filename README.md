@@ -411,12 +411,12 @@ also widen it.
 
 Normalization holds the reads it selects in memory until sampling finishes, which for a large
 request on long reads can be more memory than a machine has. `--max-read-buffer` caps that buffer,
-1 GB by default. It is a cap on the selected reads and nothing else: scoring reads against the
-profile also keeps a few reads per thread in transit, a couple of megabytes a thread on any input,
-which sits outside the cap. A request projected to need more is served by a path that buffers read positions
-instead of read sequences, then reads the input a second time to write them out: less memory, one
-extra pass. Both paths pick the same reads for a given seed, so the cap changes what a run costs
-while the estimate stays the same. The projection comes from the mean read length, so a run can
+1 GB by default. The cap covers the selected reads and nothing else; scoring reads against the
+profile keeps a couple of megabytes of reads per thread in transit, which sits outside it. A request
+projected to need more than the cap is served by a path that buffers read positions instead of read
+sequences, then reads the input a second time to write them out: less memory, one extra pass. Both
+paths pick the same reads for a given seed, so the cap changes what a run costs while the estimate
+stays the same. The projection comes from the mean read length, so a run can
 still buffer past the cap; when it does, it says so and by how much.
 
 ### Two-set strategy

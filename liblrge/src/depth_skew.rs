@@ -527,8 +527,8 @@ pub(crate) struct ScoredRead {
 /// A read on its way to a scorer.
 ///
 /// The identifier rides along even though only the buffered selection path ever reads it. It is
-/// well under a percent of what a read weighs against its sequence, which the pipeline has to copy
-/// either way, and carrying it is what lets one pipeline serve both paths.
+/// well under a percent of the bytes a read's sequence takes, and the pipeline has to copy the
+/// sequence either way, so carrying it is what lets one pipeline serve both paths.
 struct Read {
     id: Vec<u8>,
     sequence: Vec<u8>,
@@ -539,15 +539,15 @@ struct Read {
 /// A read's retention probability depends only on that read and the finished profile, so scoring
 /// parallelises. The reservoir that consumes the scores does not: it draws from a seeded stream in
 /// record order, so a seed only keeps its meaning if it is offered the same probabilities in the
-/// same order. Workers scoring ahead of a sequential consumer gives both.
+/// same order. Having workers score ahead of a sequential consumer gives both.
 ///
 /// Batches go to the workers in turn and are collected back in the same turn, so record order
 /// needs no reconstructing and a worker that dies is noticed rather than waited on forever. It
 /// also bounds what is held: a worker takes another batch only once it has somewhere to put the
 /// one it has, so the pipeline holds [`SCORING_PIPELINE_BATCHES`] batches a thread, a couple of
 /// megabytes a thread whatever the input. The read that closed a batch and the reads' identifiers
-/// ride over that, which is why the figure logged below says about. These are reads in transit
-/// rather than reads selected, so they sit outside what `--max-read-buffer` caps.
+/// ride over that, so the figure logged below is approximate. These are reads in transit rather
+/// than reads selected, so they sit outside what `--max-read-buffer` caps.
 ///
 /// The cost of collecting in turn is that a worker held up by the machine holds up the pass once
 /// its queue fills, where handing every batch to whoever is free would not. Batches are equal in
@@ -643,8 +643,8 @@ pub(crate) fn score_reads(
 /// Hand a batch to the worker whose turn it is.
 ///
 /// A closed queue means that worker has gone, which on this side of the pass only happens when it
-/// died. Stopping here is what keeps the reader from walking the rest of the input into a pipeline
-/// nothing is draining; the panic the scope carries out is the report.
+/// died. Stopping here keeps the reader from walking the rest of the input into a pipeline nothing
+/// is draining, and the panic the scope carries out says what went wrong.
 fn hand_over(
     queues: &[channel::Sender<Vec<Read>>],
     turn: &mut usize,
@@ -1232,7 +1232,7 @@ mod tests {
 
     /// Reads of uneven length, enough of them to fill several batches, with one long enough on its
     /// own to close the batch it lands in, so batches of very different sizes travel the pipeline
-    /// together and no worker gets an equal share.
+    /// together and the workers do not get equal shares of the work.
     fn uneven_fasta() -> tempfile::NamedTempFile {
         let mut input = tempfile::NamedTempFile::new().unwrap();
         for index in 0..600_u64 {
