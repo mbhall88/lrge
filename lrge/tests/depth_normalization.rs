@@ -213,6 +213,8 @@ fn a_generous_budget_keeps_the_buffered_path() {
     assert!(!log.contains("Selected reads by position"));
 }
 
+/// Reads are scored for retention in parallel, so a thread count has to be free to change without
+/// moving the estimate. Both normalized selection paths score every read, so both are checked.
 #[test]
 fn the_estimate_does_not_depend_on_the_thread_count() {
     let input = skewed_reads();
@@ -226,17 +228,24 @@ fn the_estimate_does_not_depend_on_the_thread_count() {
         "--normalize",
         "auto",
     ];
-    let mut single = arguments.to_vec();
-    single.extend(["-t", "1"]);
-    let mut many = arguments.to_vec();
-    many.extend(["-t", "4"]);
 
-    let (single_estimate, single_log) = run(&input, &single);
-    let (many_estimate, _) = run(&input, &many);
+    for buffer in ["4G", "1"] {
+        let mut single = arguments.to_vec();
+        single.extend(["-t", "1", "--max-read-buffer", buffer]);
+        let mut many = arguments.to_vec();
+        many.extend(["-t", "4", "--max-read-buffer", buffer]);
 
-    assert!(single_log.contains("Depth skew detected"));
-    assert_eq!(
-        single_estimate, many_estimate,
-        "one thread estimated {single_estimate}, four estimated {many_estimate}"
-    );
+        let (single_estimate, single_log) = run(&input, &single);
+        let (many_estimate, _) = run(&input, &many);
+
+        assert!(single_log.contains("Depth skew detected"));
+        assert_eq!(
+            single_log.contains("Selected reads by position"),
+            buffer == "1"
+        );
+        assert_eq!(
+            single_estimate, many_estimate,
+            "at a {buffer} read buffer, one thread estimated {single_estimate}, four estimated {many_estimate}"
+        );
+    }
 }

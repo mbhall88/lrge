@@ -2,6 +2,7 @@ use std::collections::{BinaryHeap, HashSet};
 use std::fmt;
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Instant;
 
 use crossbeam_channel as channel;
 use log::debug;
@@ -96,6 +97,18 @@ const RETENTION_TARGET_MULTIPLIER: u32 = 2;
 // Bases of sequence a profiling batch gathers before it is handed to a worker. Batching keeps the
 // channel out of the way of the sketch work, which is what the profiling pass is really doing.
 const PROFILE_BATCH_BASES: usize = 1 << 20;
+// Bases of sequence a scoring batch gathers before it is handed to a worker. Smaller than a
+// profiling batch because a scoring batch makes a round trip: it holds the reads until the
+// consumer has seen them, so its size sets what the pipeline holds in memory. A batch is at least
+// one read, so it runs over this by up to the length of the read that closed it.
+const SCORING_BATCH_BASES: usize = 1 << 18;
+// Scoring batches a worker may have queued on either side of it. Batches hold the same number of
+// bases and the workers are alike, so one is rarely more than a batch behind the others; two of
+// slack absorbs the jitter of sharing a machine without holding reads that buy nothing.
+const SCORING_QUEUE_BATCHES: usize = 2;
+// What the pipeline holds at once, per thread: a queue on each side of a worker, and the batch it
+// is scoring. See [`score_reads`].
+const SCORING_PIPELINE_BATCHES: usize = 2 * SCORING_QUEUE_BATCHES + 1;
 
 #[derive(Clone)]
 pub(crate) struct DepthSkewReport {
@@ -285,6 +298,7 @@ pub(crate) fn profile(
 ) -> crate::Result<DepthProfile> {
     let threads = threads.max(1);
     debug!("Profiling read depth across the input on {threads} thread(s)...");
+    let started = Instant::now();
     let sketch = CountMinSketch::new();
     let draw_sample = sample.is_none();
 
@@ -368,12 +382,11 @@ pub(crate) fn profile(
         "Median depth is {median_count} across {} sampled minimizers",
         counts.len()
     );
+    debug!("Built the depth profile in {:.2?}", started.elapsed());
 
     Ok(DepthProfile {
         sketch,
         median_count,
-        positions: Vec::new(),
-        counts: Vec::new(),
     })
 }
 
@@ -455,13 +468,34 @@ fn depth_skew_report(
 pub(crate) struct DepthProfile {
     sketch: CountMinSketch,
     median_count: u32,
+}
+
+impl DepthProfile {
+    /// A scorer that reads this profile, with scratch of its own.
+    pub(crate) fn scorer(&self) -> RetentionScorer<'_> {
+        RetentionScorer {
+            profile: self,
+            positions: Vec::new(),
+            counts: Vec::new(),
+        }
+    }
+}
+
+/// Scores reads against a finished [`DepthProfile`].
+///
+/// Scoring a read needs scratch to hold its minimizer positions and their counts, and reusing that
+/// across reads is most of why the pass is affordable. The scratch lives here rather than on the
+/// profile so that threads scoring against one profile each take their own.
+pub(crate) struct RetentionScorer<'a> {
+    profile: &'a DepthProfile,
     positions: Vec<u32>,
     counts: Vec<u32>,
 }
 
-impl DepthProfile {
-    pub(crate) fn retention_probability(&mut self, sequence: &[u8]) -> f64 {
-        let sketch = &self.sketch;
+impl RetentionScorer<'_> {
+    /// The probability normalization keeps a read of this sequence.
+    pub(crate) fn probability(&mut self, sequence: &[u8]) -> f64 {
+        let sketch = &self.profile.sketch;
         let counts = &mut self.counts;
         counts.clear();
         for_each_sampled_minimizer(sequence, &mut self.positions, |value| {
@@ -476,10 +510,158 @@ impl DepthProfile {
         let (_, read_depth, _) = counts.select_nth_unstable(middle);
         let read_depth = (*read_depth).max(1);
         let target = self
+            .profile
             .median_count
             .saturating_mul(RETENTION_TARGET_MULTIPLIER);
         (target as f64 / read_depth as f64).min(1.0)
     }
+}
+
+/// A read, and the probability the profile keeps it.
+pub(crate) struct ScoredRead {
+    pub(crate) id: Vec<u8>,
+    pub(crate) sequence: Vec<u8>,
+    pub(crate) retention_probability: f64,
+}
+
+/// A read on its way to a scorer.
+///
+/// The identifier rides along even though only the buffered selection path ever reads it. It is
+/// well under a percent of the bytes a read's sequence takes, and the pipeline has to copy the
+/// sequence either way, so carrying it is what lets one pipeline serve both paths.
+struct Read {
+    id: Vec<u8>,
+    sequence: Vec<u8>,
+}
+
+/// Score every read of `input` for retention, and hand each to `consume` in record order.
+///
+/// A read's retention probability depends only on that read and the finished profile, so scoring
+/// parallelises. The reservoir that consumes the scores does not: it draws from a seeded stream in
+/// record order, so a seed only keeps its meaning if it is offered the same probabilities in the
+/// same order. Having workers score ahead of a sequential consumer gives both.
+///
+/// Batches go to the workers in turn and are collected back in the same turn, so record order
+/// needs no reconstructing and a worker that dies is noticed rather than waited on forever. It
+/// also bounds what is held: a worker takes another batch only once it has somewhere to put the
+/// one it has, so the pipeline holds [`SCORING_PIPELINE_BATCHES`] batches a thread, a couple of
+/// megabytes a thread whatever the input. The read that closed a batch and the reads' identifiers
+/// ride over that, so the figure logged below is approximate. These are reads in transit rather
+/// than reads selected, so they sit outside what `--max-read-buffer` caps.
+///
+/// The cost of collecting in turn is that a worker held up by the machine holds up the pass once
+/// its queue fills, where handing every batch to whoever is free would not. Batches are equal in
+/// bases and the work is the same for each, so the workers finish in much the same time and the
+/// queues carry the rest.
+pub(crate) fn score_reads(
+    input: &Path,
+    profile: &DepthProfile,
+    threads: usize,
+    mut consume: impl FnMut(usize, ScoredRead),
+) -> crate::Result<()> {
+    let threads = threads.max(1);
+    debug!(
+        "Scoring reads for retention on {threads} thread(s), holding up to about {} bytes of reads in flight...",
+        SCORING_PIPELINE_BATCHES * threads * SCORING_BATCH_BASES
+    );
+    let started = Instant::now();
+
+    let read_result = std::thread::scope(|scope| {
+        let mut queues = Vec::with_capacity(threads);
+        let mut scored = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            let (queue, unscored) = channel::bounded::<Vec<Read>>(SCORING_QUEUE_BATCHES);
+            let (done, finished) = channel::bounded::<Vec<ScoredRead>>(SCORING_QUEUE_BATCHES);
+            queues.push(queue);
+            scored.push(finished);
+            scope.spawn(move || {
+                let mut scorer = profile.scorer();
+                for reads in unscored {
+                    let batch: Vec<ScoredRead> = reads
+                        .into_iter()
+                        .map(|read| {
+                            let retention_probability = scorer.probability(&read.sequence);
+                            ScoredRead {
+                                id: read.id,
+                                sequence: read.sequence,
+                                retention_probability,
+                            }
+                        })
+                        .collect();
+                    // A send fails only once the consumer has gone, which ends the pass anyway.
+                    if done.send(batch).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+
+        let reader = scope.spawn(move || {
+            let mut reads = Vec::new();
+            let mut batch_bases = 0_usize;
+            let mut turn = 0_usize;
+            let read_result = io::iter_records(input, |id, sequence| {
+                batch_bases += sequence.len();
+                reads.push(Read {
+                    id: id.to_vec(),
+                    sequence: sequence.to_vec(),
+                });
+                if batch_bases >= SCORING_BATCH_BASES {
+                    batch_bases = 0;
+                    hand_over(&queues, &mut turn, std::mem::take(&mut reads))?;
+                }
+                Ok(())
+            });
+            if read_result.is_ok() && !reads.is_empty() {
+                hand_over(&queues, &mut turn, reads)?;
+            }
+            read_result
+        });
+
+        let mut index = 0_usize;
+        let mut turn = 0_usize;
+        // Each worker gives its batches up in the order it was handed them, and they were handed
+        // out in turn, so taking them back in turn walks the input in record order. A worker with
+        // nothing left to give ends the pass, whether it ran out of reads or died holding some.
+        while let Ok(batch) = scored[turn % threads].recv() {
+            turn += 1;
+            for read in batch {
+                consume(index, read);
+                index += 1;
+            }
+        }
+        // A worker the loop above stopped short of may still be holding a finished batch it cannot
+        // put down. Letting go of every receiver frees it, and freeing it frees the reader waiting
+        // to hand it more, so the join below has something to report rather than something to wait
+        // on.
+        drop(scored);
+
+        reader.join().expect("read scoring thread panicked")
+    });
+    read_result?;
+
+    debug!("Scored reads for retention in {:.2?}", started.elapsed());
+    Ok(())
+}
+
+/// Hand a batch to the worker whose turn it is.
+///
+/// A closed queue means that worker has gone, which on this side of the pass only happens when it
+/// died. Stopping here keeps the reader from walking the rest of the input into a pipeline nothing
+/// is draining, and the panic the scope carries out says what went wrong.
+fn hand_over(
+    queues: &[channel::Sender<Vec<Read>>],
+    turn: &mut usize,
+    reads: Vec<Read>,
+) -> std::io::Result<()> {
+    let queue = &queues[*turn % queues.len()];
+    *turn += 1;
+    queue.send(reads).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "a read scoring thread stopped early",
+        )
+    })
 }
 
 /// One cache line of counters.
@@ -1029,14 +1211,16 @@ mod tests {
             .map(|index| pseudo_random_dna(5_000, index + 1))
             .collect();
 
-        let mut single = profile(input.path(), 1, None).unwrap();
-        let mut many = profile(input.path(), 4, None).unwrap();
+        let single = profile(input.path(), 1, None).unwrap();
+        let many = profile(input.path(), 4, None).unwrap();
 
         assert_eq!(single.median_count, many.median_count);
+        let mut single_scorer = single.scorer();
+        let mut many_scorer = many.scorer();
         for read in &reads {
             assert_eq!(
-                single.retention_probability(read),
-                many.retention_probability(read)
+                single_scorer.probability(read),
+                many_scorer.probability(read)
             );
         }
     }
@@ -1048,5 +1232,62 @@ mod tests {
         let profile = profile(input.path(), 2, Some(detect(input.path()))).unwrap();
 
         assert!(profile.median_count >= 1);
+    }
+
+    /// Reads of uneven length, enough of them to fill several batches, with one long enough on its
+    /// own to close the batch it lands in, so batches of very different sizes travel the pipeline
+    /// together and the workers do not get equal shares of the work.
+    fn uneven_fasta() -> tempfile::NamedTempFile {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        for index in 0..600_u64 {
+            let length = if index == 137 {
+                SCORING_BATCH_BASES + 4_096
+            } else {
+                500 + (index as usize % 7) * 900
+            };
+            writeln!(
+                input,
+                ">read{index}\n{}",
+                String::from_utf8(pseudo_random_dna(length, index + 1)).unwrap()
+            )
+            .unwrap();
+        }
+        input.flush().unwrap();
+        input
+    }
+
+    /// The scores the reservoir is offered, and the order it is offered them in, decide what a
+    /// seed selects. Spreading the scoring across threads has to leave both alone.
+    #[test]
+    fn scoring_reads_in_parallel_matches_a_sequential_scorer() {
+        let input = uneven_fasta();
+        let profile = profile(input.path(), 1, None).unwrap();
+        let mut scorer = profile.scorer();
+        let mut expected = Vec::new();
+        io::iter_records(input.path(), |id, sequence| {
+            let probability = scorer.probability(sequence);
+            expected.push((id.to_vec(), sequence.to_vec(), probability));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(expected.len(), 600);
+
+        for threads in [1, 3, 8] {
+            let mut seen = Vec::new();
+            score_reads(input.path(), &profile, threads, |index, read| {
+                seen.push((index, read.id, read.sequence, read.retention_probability));
+            })
+            .unwrap();
+
+            assert_eq!(seen.len(), expected.len(), "at {threads} thread(s)");
+            for (position, (index, id, sequence, probability)) in seen.into_iter().enumerate() {
+                assert_eq!(index, position, "at {threads} thread(s)");
+                assert_eq!(
+                    (id, sequence, probability),
+                    expected[position],
+                    "read {position} at {threads} thread(s)"
+                );
+            }
+        }
     }
 }

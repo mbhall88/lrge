@@ -400,8 +400,9 @@ Detection itself is cheap: it draws minimizers from about one read in a hundred 
 On an input too small for that to reach 500 reads it samples more, because below that the verdict
 starts to turn on which reads happened to be drawn rather than on the input.
 Building the full depth profile that normalization needs costs a second pass over the input, so LRGE
-only takes that pass once it has decided to normalize, and the pass uses the thread count given to
-`--threads`. An input with no detected skew therefore costs little more than `--normalize never`.
+only takes that pass once it has decided to normalize. That pass and the scoring of every read
+against the finished profile both use the thread count given to `--threads`. An input with no
+detected skew therefore costs little more than `--normalize never`.
 
 Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
 disable both detection and normalization. A wide reported interval means the per-read estimates
@@ -410,10 +411,12 @@ also widen it.
 
 Normalization holds the reads it selects in memory until sampling finishes, which for a large
 request on long reads can be more memory than a machine has. `--max-read-buffer` caps that buffer,
-1 GB by default. A request projected to need more is served by a path that buffers read positions
-instead of read sequences, then reads the input a second time to write them out: less memory, one
-extra pass. Both paths pick the same reads for a given seed, so the cap changes what a run costs
-while the estimate stays the same. The projection comes from the mean read length, so a run can
+1 GB by default. The cap covers the selected reads and nothing else; scoring reads against the
+profile keeps a couple of megabytes of reads per thread in transit, which sits outside it. A request
+projected to need more than the cap is served by a path that buffers read positions instead of read
+sequences, then reads the input a second time to write them out: less memory, one extra pass. Both
+paths pick the same reads for a given seed, so the cap changes what a run costs while the estimate
+stays the same. The projection comes from the mean read length, so a run can
 still buffer past the cap; when it does, it says so and by how much.
 
 ### Two-set strategy

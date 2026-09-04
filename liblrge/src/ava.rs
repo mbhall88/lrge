@@ -44,6 +44,7 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crossbeam_channel as channel;
 use log::{debug, info, trace, warn};
@@ -242,6 +243,7 @@ impl AvaStrategy {
         let seen_pairs = Arc::new(Mutex::new(seen_pairs));
 
         debug!("Aligning reads and writing overlaps to PAF file...");
+        let started = Instant::now();
         // Consumer: Process records from the channel in parallel
         pool.install(|| -> Result<(), LrgeError> {
             receiver
@@ -319,6 +321,10 @@ impl AvaStrategy {
         })??;
 
         debug!("Overlaps written to: {}", paf_path.to_string_lossy());
+        debug!(
+            "Aligned reads and wrote overlaps in {:.2?}",
+            started.elapsed()
+        );
 
         let ovlap_counter = Arc::try_unwrap(ovlap_counter)
             .unwrap()
