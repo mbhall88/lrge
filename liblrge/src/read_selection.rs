@@ -258,12 +258,8 @@ impl ReadSelector {
     /// normalization is going to happen is what keeps it off an unskewed run.
     ///
     /// The profile normalizes against the median count of the minimizers detection sampled, which
-    /// is why every mode that normalizes has to have run detection. Drawing the sample here
-    /// instead, from every minimizer of every read, would draw it from a population sequencing
-    /// error dominates: nearly every distinct minimizer of a long-read set is seen in one read
-    /// only, so the median count over them is the sketch's noise floor rather than the input's
-    /// coverage depth. Detection looks at about one read in a hundred, a population small enough
-    /// that the minimizers the genome repeats are the majority of it.
+    /// is why every mode that normalizes has to have run detection, and why this pass may not draw
+    /// a sample of its own. See [`DepthDetection::sample`][crate::depth_skew::DepthDetection].
     fn ensure_depth_profile(&mut self) -> Result<()> {
         if self.depth_profile.is_some() {
             return Ok(());
@@ -636,7 +632,7 @@ mod tests {
     }
 
     /// What running an input through one normalization mode came to.
-    struct Normalized {
+    struct ModeOutcome {
         selector: ReadSelector,
         selection: SelectionResult,
         /// The bytes of the reads it wrote.
@@ -645,9 +641,9 @@ mod tests {
 
     /// Select twenty reads from `input` under `mode`, on `threads` threads.
     ///
-    /// The tests that compare one normalizing mode against the other compare the whole answer:
-    /// what the run measured, how many reads it kept, and which reads it wrote.
-    fn normalized_selection(input: &Path, mode: Normalization, threads: usize) -> Normalized {
+    /// The tests that set one mode against another compare the whole outcome: what the run
+    /// measured, how many reads it kept, and which reads it wrote.
+    fn run_mode(input: &Path, mode: Normalization, threads: usize) -> ModeOutcome {
         let output = tempfile::NamedTempFile::new().unwrap();
         let mut selector = ReadSelector::new(input, Some(42), mode)
             .unwrap()
@@ -656,11 +652,25 @@ mod tests {
             .write_selected(&[(output.path(), 20)], None)
             .unwrap();
         let reads = std::fs::read(output.path()).unwrap();
-        Normalized {
+        ModeOutcome {
             selector,
             selection,
             reads,
         }
+    }
+
+    /// A hundred reads with nothing repeated between them, so no depth stands out.
+    fn even_depth_input() -> tempfile::NamedTempFile {
+        let mut input = tempfile::NamedTempFile::new().unwrap();
+        for index in 0..100 {
+            writeln!(
+                input,
+                ">read{index}\n{}",
+                String::from_utf8(pseudo_random_dna(250, index + 1)).unwrap()
+            )
+            .unwrap();
+        }
+        input
     }
 
     #[test]
@@ -703,108 +713,81 @@ mod tests {
 
     #[test]
     fn auto_preserves_legacy_output_when_depth_is_not_skewed() {
-        let mut input = tempfile::NamedTempFile::new().unwrap();
-        for index in 0..100 {
-            writeln!(
-                input,
-                ">read{index}\n{}",
-                String::from_utf8(pseudo_random_dna(250, index + 1)).unwrap()
-            )
-            .unwrap();
-        }
-        let tempdir = tempfile::tempdir().unwrap();
-        let auto_path = tempdir.path().join("auto.fa");
-        let never_path = tempdir.path().join("never.fa");
+        let input = even_depth_input();
 
-        let mut auto = ReadSelector::new(input.path(), Some(42), Normalization::Auto).unwrap();
-        auto.write_selected(&[(auto_path.as_path(), 20)], None)
-            .unwrap();
-        let mut never = ReadSelector::new(input.path(), Some(42), Normalization::Never).unwrap();
-        never
-            .write_selected(&[(never_path.as_path(), 20)], None)
-            .unwrap();
+        let auto = run_mode(input.path(), Normalization::Auto, 1);
+        let never = run_mode(input.path(), Normalization::Never, 1);
 
-        assert!(!auto.depth_skew().skewed);
-        assert_eq!(
-            std::fs::read(auto_path).unwrap(),
-            std::fs::read(never_path).unwrap()
-        );
+        assert!(!auto.selector.depth_skew().skewed);
+        assert_eq!(auto.reads, never.reads);
     }
 
     #[test]
     fn always_normalizes_when_auto_does_not_engage() {
-        let mut input = tempfile::NamedTempFile::new().unwrap();
-        for index in 0..100 {
-            writeln!(
-                input,
-                ">read{index}\n{}",
-                String::from_utf8(pseudo_random_dna(250, index + 1)).unwrap()
-            )
-            .unwrap();
-        }
-        let tempdir = tempfile::tempdir().unwrap();
-        let auto_path = tempdir.path().join("auto.fa");
-        let always_path = tempdir.path().join("always.fa");
+        let input = even_depth_input();
 
-        let mut auto = ReadSelector::new(input.path(), Some(42), Normalization::Auto).unwrap();
-        let auto_selection = auto
-            .write_selected(&[(auto_path.as_path(), 20)], None)
-            .unwrap();
-        let mut always = ReadSelector::new(input.path(), Some(42), Normalization::Always).unwrap();
-        let always_selection = always
-            .write_selected(&[(always_path.as_path(), 20)], None)
-            .unwrap();
+        let auto = run_mode(input.path(), Normalization::Auto, 1);
+        let always = run_mode(input.path(), Normalization::Always, 1);
 
-        assert!(!auto_selection.normalized);
-        assert!(auto.normalization_message(&auto_selection).is_none());
-        assert!(always_selection.normalized);
-        assert!(always
-            .normalization_message(&always_selection)
-            .unwrap()
-            .contains("forced"));
         assert!(
-            !always.depth_skew().skewed,
+            !always.selector.depth_skew().skewed,
             "the input was called skewed, so this does not test forcing"
         );
+        assert!(!auto.selection.normalized);
+        assert!(auto
+            .selector
+            .normalization_message(&auto.selection)
+            .is_none());
+        assert!(always.selection.normalized);
+        assert!(always
+            .selector
+            .normalization_message(&always.selection)
+            .unwrap()
+            .contains("forced"));
     }
+
+    /// Bases to a read in [`error_prone_input`]. Short, because what those inputs need is a lot
+    /// of reads: fifty thousand of them separate an input whose detection draw clears the floor
+    /// from one that does not, and every base of every read is walked three times over a run.
+    const ERROR_PRONE_READ_LENGTH: usize = 40;
+    /// One base in this many is redrawn. Enough that most of an input's distinct minimizers are
+    /// singletons, few enough that a read still carries the sequence it came from.
+    const ERROR_PRONE_DENOMINATOR: u64 = 200;
+    /// Reads in every sixty that come from the element rather than the chromosome.
+    const ERROR_PRONE_ELEMENT_SHARE: usize = 14;
 
     /// An input whose distinct minimizers are mostly ones that occur in a single read.
     ///
     /// This is the shape a real long-read set has and the small inputs above do not. Reads carry
     /// substitutions, so most of what the whole input has ever seen occurs in one read only,
-    /// while the minimizers of the sequence the reads came from recur once per read that covers
-    /// them. A high-copy element gives the input a skew for detection to find.
+    /// while the minimizers of the chromosome the reads came from recur once per read covering
+    /// it. So a median taken over every distinct minimizer lands on a singleton, and one taken
+    /// over a sample of the reads lands on the chromosome's depth, which is `records` reads of
+    /// [`ERROR_PRONE_READ_LENGTH`] bases spread over `chromosome_len` of them.
     ///
-    /// It holds more reads than the detection floor times the read denominator, so detection's
-    /// own draw clears the floor. Below that the top-up hands detection every read, the sample is
-    /// the whole input's either way, and where it came from cannot matter.
-    fn error_prone_skewed_input() -> tempfile::NamedTempFile {
-        const READ_LENGTH: usize = 40;
-        const RECORDS: usize = 60_000;
-        // Fourteen reads in sixty come from the element. It is five hundred times shorter than
-        // the chromosome, so those reads cover it two orders of magnitude more deeply, which is
-        // the skew detection has to find.
-        const ELEMENT_SHARE: usize = 14;
-        // One base in this many is redrawn. Enough that most of the input's distinct minimizers
-        // are singletons, few enough that a read still carries the sequence it came from.
-        const ERROR_DENOMINATOR: u64 = 200;
-
-        let chromosome = pseudo_random_dna(50_000, 21);
-        let element = pseudo_random_dna(100, 22);
+    /// `element_len` adds a sequence that much shorter which fourteen reads in sixty come from.
+    /// It is covered orders of magnitude more deeply than the chromosome, which is the skew
+    /// detection has to find.
+    fn error_prone_input(
+        records: usize,
+        chromosome_len: usize,
+        element_len: Option<usize>,
+    ) -> tempfile::NamedTempFile {
+        let chromosome = pseudo_random_dna(chromosome_len, 21);
+        let element = element_len.map(|len| pseudo_random_dna(len, 22));
         let mut state = 99_u64;
         let mut input = tempfile::NamedTempFile::new().unwrap();
-        let mut read = Vec::with_capacity(READ_LENGTH);
-        for index in 0..RECORDS {
-            let source = if index % 60 < ELEMENT_SHARE {
-                &element
-            } else {
-                &chromosome
+        let mut read = Vec::with_capacity(ERROR_PRONE_READ_LENGTH);
+        for index in 0..records {
+            let source = match &element {
+                Some(element) if index % 60 < ERROR_PRONE_ELEMENT_SHARE => element,
+                _ => &chromosome,
             };
             let start = next_draw(&mut state) as usize % source.len();
             read.clear();
-            for offset in 0..READ_LENGTH {
+            for offset in 0..ERROR_PRONE_READ_LENGTH {
                 let mut base = source[(start + offset) % source.len()];
-                if next_draw(&mut state).is_multiple_of(ERROR_DENOMINATOR) {
+                if next_draw(&mut state).is_multiple_of(ERROR_PRONE_DENOMINATOR) {
                     base = b"ACGT"[(next_draw(&mut state) & 3) as usize];
                 }
                 read.push(base);
@@ -817,6 +800,16 @@ mod tests {
         input
     }
 
+    /// The median depth a run normalized against.
+    fn median_depth(outcome: &ModeOutcome) -> u32 {
+        outcome
+            .selector
+            .depth_profile
+            .as_ref()
+            .expect("the run normalized, so it built a profile")
+            .median_count()
+    }
+
     /// A forced normalization has to reach the answer the detector's own run reaches.
     ///
     /// Both modes normalize against the median count of a bottom-k sample of minimizers, and what
@@ -827,12 +820,15 @@ mod tests {
     /// Forcing normalization must not change which of the two the run measures.
     #[test]
     fn forcing_normalization_measures_the_same_depth_as_detecting_it() {
-        let input = error_prone_skewed_input();
+        // Sixty thousand reads is more than the detection floor times the read denominator, so
+        // detection's own draw clears the floor. Below that the top-up hands detection every
+        // read, the sample is the whole input's either way, and where it came from cannot matter.
+        let input = error_prone_input(60_000, 50_000, Some(100));
 
         // Both passes over the input parallelise, and neither depends on how the work is divided,
         // so the threads only buy the suite back some of the time this input costs.
-        let auto = normalized_selection(input.path(), Normalization::Auto, 4);
-        let always = normalized_selection(input.path(), Normalization::Always, 4);
+        let auto = run_mode(input.path(), Normalization::Auto, 4);
+        let always = run_mode(input.path(), Normalization::Always, 4);
         let detection = auto.selector.depth_skew();
 
         assert!(
@@ -847,10 +843,46 @@ mod tests {
         );
         assert!(auto.selection.normalized);
         assert_eq!(
+            median_depth(&auto),
+            median_depth(&always),
+            "forcing normalization measured a different depth than detecting skew did"
+        );
+        assert_eq!(
             auto.selection.retained_records, always.selection.retained_records,
             "forcing normalization retained a different number of reads than detecting skew did"
         );
         assert_eq!(auto.reads, always.reads);
+    }
+
+    /// Between the detection floor and a hundredth of the input, detection settles for the floor,
+    /// and the floor is still few enough reads for the median to land on the coverage depth. This
+    /// is the band the benchmark's smallest accession sits in, and the band a forced run used to
+    /// measure at the sketch's noise floor: it drew from every read, where its distinct minimizers
+    /// are mostly singletons.
+    #[test]
+    fn a_forced_run_measures_depth_from_the_floor_when_the_draw_falls_short() {
+        // A hundredth of ten thousand reads is a hundred, well short of the floor, and ten
+        // thousand forty-base reads over four thousand bases covers them deeply enough that the
+        // distinct minimizers of the whole input are mostly singletons while the five hundred
+        // reads the floor settles for hold the chromosome's many times over.
+        let input = error_prone_input(10_000, 4_000, None);
+
+        let always = run_mode(input.path(), Normalization::Always, 1);
+        let detection = always.selector.depth_skew();
+
+        assert_eq!(
+            detection.sampled_records,
+            crate::depth_skew::DETECTION_READ_FLOOR
+        );
+        assert!(
+            detection.sampled_records < always.selector.num_records(),
+            "detection sampled every read, so the sample is the whole input's"
+        );
+        // The whole input's minimizers put this at 1, which is the floor a count-min sketch reads
+        // back for a minimizer it has counted once. The reads detection samples put it in the
+        // tens.
+        let median = median_depth(&always);
+        assert!(median >= 10, "median depth was {median}, not tens");
     }
 
     /// An input holding fewer reads than the detection floor has every one of them sampled.
@@ -864,8 +896,8 @@ mod tests {
     fn an_input_below_the_detection_floor_is_sampled_whole() {
         let input = skewed_input();
 
-        let auto = normalized_selection(input.path(), Normalization::Auto, 1);
-        let always = normalized_selection(input.path(), Normalization::Always, 1);
+        let auto = run_mode(input.path(), Normalization::Auto, 1);
+        let always = run_mode(input.path(), Normalization::Always, 1);
         let records = always.selector.num_records();
         let detection = always.selector.depth_skew();
 

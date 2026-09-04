@@ -492,6 +492,12 @@ pub(crate) struct DepthProfile {
 }
 
 impl DepthProfile {
+    /// The input's median depth, which every read is scored for retention against.
+    #[cfg(test)]
+    pub(crate) fn median_count(&self) -> u32 {
+        self.median_count
+    }
+
     /// A scorer that reads this profile, with scratch of its own.
     pub(crate) fn scorer(&self) -> RetentionScorer<'_> {
         RetentionScorer {
@@ -867,8 +873,9 @@ fn reserve_salt(seed: Option<u64>) -> u64 {
 
 /// The minimizers with the smallest hashes seen so far, at most `capacity` of them.
 ///
-/// Which minimizers this keeps depends only on the set it was shown, not the order, so two of
-/// these can be merged by showing one the other's keys.
+/// Which minimizers this keeps depends only on the set it was shown, not the order it was shown
+/// them in, so the reads a pass draws from decide the sample and how the pass was divided up
+/// does not.
 pub(crate) struct DistinctSample {
     capacity: usize,
     entries: BinaryHeap<(u64, u64)>,
