@@ -38,6 +38,10 @@ pub struct Args {
     #[arg(long, value_name = "MODE", default_value = "auto")]
     pub normalize: liblrge::Normalization,
 
+    /// How to split an input too small to supply both read sets [scale, target]
+    #[arg(long, value_name = "MODE", default_value = "scale")]
+    pub shortfall: liblrge::Shortfall,
+
     /// Exclude overlaps for internal matches
     #[arg(short = 'F', long = "filter-contained")]
     pub filter_contained: bool,
@@ -351,6 +355,32 @@ mod tests {
             .to_string();
 
         assert!(error.contains("expected auto, always, or never"));
+    }
+
+    #[test]
+    fn cli_accepts_shortfall_modes() {
+        for (mode, expected) in [
+            ("scale", liblrge::Shortfall::Scale),
+            ("target", liblrge::Shortfall::Target),
+        ] {
+            let opts = Args::try_parse_from([BIN, "Cargo.toml", "--shortfall", mode]).unwrap();
+            assert_eq!(opts.shortfall, expected);
+        }
+    }
+
+    #[test]
+    fn cli_defaults_to_scaling_the_shortfall() {
+        let opts = Args::try_parse_from([BIN, "Cargo.toml"]).unwrap();
+        assert_eq!(opts.shortfall, liblrge::Shortfall::Scale);
+    }
+
+    #[test]
+    fn cli_rejects_invalid_shortfall_mode() {
+        let error = Args::try_parse_from([BIN, "Cargo.toml", "--shortfall", "query"])
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("expected scale or target"));
     }
 
     #[test]

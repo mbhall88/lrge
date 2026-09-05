@@ -194,6 +194,48 @@ impl FromStr for Normalization {
     }
 }
 
+/// Controls how a two-set run splits an input too small to supply both read sets.
+///
+/// The target set is what estimates the overlap proportion, so the precision of every per-read
+/// estimate is governed by how many target reads there are. The query set only supplies the number
+/// of estimates the median is taken over, which is a much weaker lever. An input too small to fill
+/// both is by definition one where overlaps are already scarce, so which set absorbs the shortfall
+/// changes the estimate a great deal. A pool of about 7,500 reads from three accessions whose
+/// genome size is known was divided five ways on three seeds each: taking the median of the three
+/// seeds, the estimate rose with the target's share at every step on all three, and the runs are
+/// in `paper/corrections/issue60_split_sweep.tsv`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Shortfall {
+    /// Scale both sets down together, keeping the requested target:query ratio.
+    #[default]
+    Scale,
+    /// Take the whole shortfall from the target set, keeping the full query request.
+    ///
+    /// This is what LRGE did up to and including v0.3.0. It inverts a target-heavy request: an
+    /// input of 7,473 reads asked for 10,000 target and 5,000 query comes out as 2,473 target and
+    /// 5,000 query, a ratio of 0.49:1 where 2:1 was asked for.
+    ///
+    /// It also steps rather than slides. There is nothing left in the target set to give up once
+    /// the pool falls to what the query asked for, so a request for 800 and 200 served by 201
+    /// reads keeps the query whole at 1 and 200, while 200 reads scales both to 160 and 40. One
+    /// read fewer, and the target set grows a hundred and sixty fold.
+    Target,
+}
+
+impl FromStr for Shortfall {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "scale" => Ok(Self::Scale),
+            "target" => Ok(Self::Target),
+            _ => Err(format!(
+                "invalid shortfall mode '{value}'; expected scale or target"
+            )),
+        }
+    }
+}
+
 /// The sequencing platform used to generate the reads.
 ///
 /// # Examples
