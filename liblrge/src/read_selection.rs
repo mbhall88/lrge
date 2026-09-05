@@ -10,7 +10,7 @@ use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 
 use crate::depth_skew::{self, DepthProfile, DepthSkewDetector, DepthSkewReport, DistinctSample};
-use crate::{io, Normalization, Result, DEFAULT_MAX_READ_BUFFER};
+use crate::{io, Normalization, Result, Shortfall, DEFAULT_MAX_READ_BUFFER};
 
 /// Bytes charged to a buffered read on top of its identifier and sequence, covering the two
 /// heap allocations, the record itself, and a typical read identifier.
@@ -28,6 +28,7 @@ pub(crate) struct ReadSelector {
     depth_profile: Option<DepthProfile>,
     threads: usize,
     max_read_buffer: u64,
+    shortfall: Shortfall,
 }
 
 pub(crate) struct SelectionResult {
@@ -85,6 +86,7 @@ impl ReadSelector {
             depth_profile: None,
             threads: 1,
             max_read_buffer: DEFAULT_MAX_READ_BUFFER,
+            shortfall: Shortfall::default(),
         })
     }
 
@@ -94,6 +96,16 @@ impl ReadSelector {
     /// whatever thread count builds it.
     pub(crate) fn threads(mut self, threads: usize) -> Self {
         self.threads = threads;
+        self
+    }
+
+    /// Set how a pool too small to fill every output is divided between them.
+    ///
+    /// This is the second of the two places the rule is applied. The first is the caller's own
+    /// clamp against the number of reads in the input; the two have to agree, or one re-divides
+    /// what the other divided.
+    pub(crate) fn shortfall(mut self, shortfall: Shortfall) -> Self {
+        self.shortfall = shortfall;
         self
     }
 
@@ -346,6 +358,7 @@ impl ReadSelector {
         let output_records = allocate_output_counts(
             outputs.iter().map(|(_, count)| *count).collect(),
             selected.len(),
+            self.shortfall,
         );
         let mut lengths = vec![0; outputs.len()];
         for (output_index, (records, (path, _))) in split_by_output(&mut selected, &output_records)
@@ -393,6 +406,7 @@ impl ReadSelector {
         let output_records = allocate_output_counts(
             outputs.iter().map(|(_, count)| *count).collect(),
             selected.len(),
+            self.shortfall,
         );
 
         // Assignments are walked in input order during the write pass, matching the order the
@@ -557,17 +571,44 @@ impl BufferedRecord {
     }
 }
 
-fn allocate_output_counts(mut requested: Vec<usize>, selected: usize) -> Vec<usize> {
+/// Divide `selected` reads between outputs that asked for `requested`.
+///
+/// A pool that fills the request is handed out as asked. A short one is divided by `shortfall`:
+/// [`Shortfall::Scale`] keeps the requested ratio, and [`Shortfall::Target`] takes the whole
+/// shortfall from the first output. `Target` still scales once the pool falls below what the
+/// second output asked for, because there is nothing left in the first to take.
+///
+/// Whole reads do not divide evenly. `Scale` gives the remainder to the first output, which for a
+/// two-set run is the target set the estimate's precision rests on, while `Target` rounds the
+/// other way so that it restores the older behaviour to the read. Both outputs keep a read as long
+/// as the pool holds one for each; a pool of one read goes to the last output, and a caller that
+/// needs every output filled has to reject that itself.
+///
+/// The two clamps compose. A 7,473-read input asked for 10,000 target and 5,000 query is divided
+/// here into 4,982 and 2,491, and a normalized pool of 3,756 is then divided into 2,504 and 1,252:
+/// scaling a scaled request leaves the ratio where it was.
+pub(crate) fn allocate_output_counts(
+    mut requested: Vec<usize>,
+    selected: usize,
+    shortfall: Shortfall,
+) -> Vec<usize> {
     let total_requested = requested.iter().sum::<usize>();
     let mut shortage = total_requested.saturating_sub(selected);
     if requested.len() == 2
         && requested.iter().all(|count| *count > 0)
         && shortage > 0
         && selected >= 2
-        && selected <= requested[1]
+        && (shortfall == Shortfall::Scale || selected <= requested[1])
     {
-        let first = ((selected as u128 * requested[0] as u128) / total_requested as u128)
-            .clamp(1, (selected - 1) as u128) as usize;
+        let scaled = selected as u128 * requested[0] as u128;
+        let first = match shortfall {
+            // Whole reads do not divide evenly, and the remainder goes to the target set the
+            // estimate's precision rests on.
+            Shortfall::Scale => scaled.div_ceil(total_requested as u128),
+            // Rounding the other way here is what makes `target` restore v0.3.0 to the read.
+            Shortfall::Target => scaled / total_requested as u128,
+        }
+        .clamp(1, (selected - 1) as u128) as usize;
         return vec![first, selected - first];
     }
 
@@ -1316,12 +1357,81 @@ mod tests {
     }
 
     #[test]
-    fn undersized_two_set_pool_preserves_the_query_when_possible() {
-        assert_eq!(allocate_output_counts(vec![800, 200], 500), vec![300, 200]);
+    fn an_undersized_pool_keeps_the_requested_ratio() {
+        assert_eq!(
+            allocate_output_counts(vec![800, 200], 500, Shortfall::Scale),
+            vec![400, 100]
+        );
+        // The 7,473-read subsample of SRR26715166 that issue #60 was written against.
+        assert_eq!(
+            allocate_output_counts(vec![10_000, 5_000], 7_473, Shortfall::Scale),
+            vec![4_982, 2_491]
+        );
+    }
+
+    /// Scaling is not a rule about which set is larger, so a deliberately query-heavy request
+    /// comes out query-heavy.
+    #[test]
+    fn an_undersized_pool_keeps_a_query_heavy_ratio_too() {
+        assert_eq!(
+            allocate_output_counts(vec![2_000, 8_000], 5_000, Shortfall::Scale),
+            vec![1_000, 4_000]
+        );
     }
 
     #[test]
-    fn pool_smaller_than_the_query_scales_both_sets() {
-        assert_eq!(allocate_output_counts(vec![800, 200], 100), vec![80, 20]);
+    fn the_target_mode_takes_the_shortfall_from_the_target() {
+        assert_eq!(
+            allocate_output_counts(vec![800, 200], 500, Shortfall::Target),
+            vec![300, 200]
+        );
+    }
+
+    #[test]
+    fn a_pool_smaller_than_the_query_scales_both_sets_in_either_mode() {
+        assert_eq!(
+            allocate_output_counts(vec![800, 200], 100, Shortfall::Target),
+            vec![80, 20]
+        );
+        assert_eq!(
+            allocate_output_counts(vec![800, 200], 100, Shortfall::Scale),
+            vec![80, 20]
+        );
+    }
+
+    /// A pool of two is the smallest a two-set run can use, and it has to come out one and one
+    /// rather than rounding the query away.
+    #[test]
+    fn both_sets_keep_a_read_while_the_pool_allows() {
+        assert_eq!(
+            allocate_output_counts(vec![10_000, 5_000], 2, Shortfall::Scale),
+            vec![1, 1]
+        );
+    }
+
+    /// The point of `Target` is to restore what LRGE did before, so it has to agree to the read
+    /// rather than only in the ratio.
+    #[test]
+    fn the_two_modes_round_the_remainder_opposite_ways() {
+        assert_eq!(
+            allocate_output_counts(vec![10_000, 5_000], 4_000, Shortfall::Scale),
+            vec![2_667, 1_333]
+        );
+        assert_eq!(
+            allocate_output_counts(vec![10_000, 5_000], 4_000, Shortfall::Target),
+            vec![2_666, 1_334]
+        );
+    }
+
+    #[test]
+    fn a_pool_that_fills_the_request_is_left_alone() {
+        assert_eq!(
+            allocate_output_counts(vec![800, 200], 1_000, Shortfall::Scale),
+            vec![800, 200]
+        );
+        assert_eq!(
+            allocate_output_counts(vec![800, 200], 5_000, Shortfall::Target),
+            vec![800, 200]
+        );
     }
 }
