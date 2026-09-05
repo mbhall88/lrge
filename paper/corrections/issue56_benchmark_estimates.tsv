@@ -1,0 +1,35 @@
+accession	class	platform	truth_bp	mode	estimate_bp	estimate_over_truth	published_estimate_bp	published_estimate_note	normalization_engaged	skew_score	detection_sample_reads	profile_median_depth	retained_reads	total_reads	queries_without_overlaps_pct	small_pool_warning	elapsed	max_rss_kb	exit_status
+DRR213976	outlier	OXFORD_NANOPORE	3927137	never	1624917	0.414	NA	no run at these settings in the published table	no	NA	NA	NA	NA	56694	0.04	no	0:47.25	3863980	0
+DRR213976	outlier	OXFORD_NANOPORE	3927137	auto	2828479	0.720	1957486	same detection sample; any move is the #47 sketch rework	yes	33.00	579	27	39586	56694	NA	no	0:41.48	2904908	0
+SRR10259778	outlier	OXFORD_NANOPORE	4848320	never	509882	0.105	NA	no run at these settings in the published table	no	NA	NA	NA	NA	41774	0.42	no	1:24.51	4651636	0
+SRR10259778	outlier	OXFORD_NANOPORE	4848320	auto	2125186	0.438	786594	detection sample rose from 427 to 500 under the #48 floor	yes	43.00	500	24	35104	41774	0.62	no	0:54.52	4462180	0
+SRR10353548	outlier	OXFORD_NANOPORE	2269994	never	37867	0.017	NA	no run at these settings in the published table	no	NA	NA	NA	NA	251253	NA	no	1:24.21	1169008	0
+SRR10353548	outlier	OXFORD_NANOPORE	2269994	auto	2332247	1.027	2276320	same detection sample; any move is the #47 sketch rework	yes	281.00	2546	21	84208	251253	NA	no	0:21.90	685732	0
+SRR10388020	outlier	OXFORD_NANOPORE	2218399	never	778305	0.351	NA	no run at these settings in the published table	no	NA	NA	NA	NA	182663	NA	no	1:07.11	1137544	0
+SRR10388020	outlier	OXFORD_NANOPORE	2218399	auto	2314366	1.043	2273770	same detection sample; any move is the #47 sketch rework	yes	205.00	1838	16	66867	182663	NA	no	0:15.92	608880	0
+SRR10861747	outlier	OXFORD_NANOPORE	2211092	never	42572	0.019	NA	no run at these settings in the published table	no	NA	NA	NA	NA	205462	NA	no	2:14.14	2116352	0
+SRR10861747	outlier	OXFORD_NANOPORE	2211092	auto	2192374	0.992	2144950	same detection sample; any move is the #47 sketch rework	yes	340.00	2065	21	45443	205462	NA	no	0:15.20	1016040	0
+SRR10861751	outlier	OXFORD_NANOPORE	2220590	never	39754	0.018	39754	reproduces the published run	no	NA	NA	NA	NA	98030	NA	no	2:39.07	3175852	0
+SRR10861751	outlier	OXFORD_NANOPORE	2220590	auto	2200418	0.991	2077501	same detection sample; any move is the #47 sketch rework	yes	203.00	994	15	25034	98030	NA	no	0:12.84	1081868	0
+SRR12247681	control	OXFORD_NANOPORE	5067008	never	4745472	0.937	4745472	reproduces the published run	no	NA	NA	NA	NA	315509	6.60	no	0:20.00	723904	0
+SRR12247681	control	OXFORD_NANOPORE	5067008	auto	5544558	1.094	5639060	same detection sample; any move is the #47 sketch rework	yes	104.00	3172	27	141292	315509	4.12	no	0:18.49	705296	0
+SRR24489322	outlier	OXFORD_NANOPORE	4296919	never	879767	0.205	NA	no run at these settings in the published table	no	NA	NA	NA	NA	74503	0.74	no	0:50.59	2855376	0
+SRR24489322	outlier	OXFORD_NANOPORE	4296919	auto	1799306	0.419	1153835	same detection sample; any move is the #47 sketch rework	yes	21.00	748	26	55406	74503	1.18	no	0:38.26	2155716	0
+SRR26465521	outlier	OXFORD_NANOPORE	2285943	never	42314	0.019	NA	no run at these settings in the published table	no	NA	NA	NA	NA	88519	0.24	no	5:13.26	3284672	0
+SRR26465521	outlier	OXFORD_NANOPORE	2285943	auto	2237900	0.979	2142828	same detection sample; any move is the #47 sketch rework	yes	252.00	897	34	23571	88519	0.46	no	0:32.61	1596612	0
+SRR26465523	outlier	OXFORD_NANOPORE	2235838	never	59659	0.027	NA	no run at these settings in the published table	no	NA	NA	NA	NA	63538	0.30	no	2:44.08	2342976	0
+SRR26465523	outlier	OXFORD_NANOPORE	2235838	auto	2152985	0.963	2190770	same detection sample; any move is the #47 sketch rework	yes	142.00	649	44	29721	63538	0.62	no	0:19.23	1181652	0
+SRR26465524	outlier	OXFORD_NANOPORE	2287581	never	53362	0.023	NA	no run at these settings in the published table	no	NA	NA	NA	NA	53491	0.36	no	4:35.87	3650484	0
+SRR26465524	outlier	OXFORD_NANOPORE	2287581	auto	2138308	0.935	2112788	same detection sample; any move is the #47 sketch rework	yes	180.00	554	30	15422	53491	0.50	no	0:33.68	1915316	0
+SRR26465526	outlier	OXFORD_NANOPORE	2230369	never	27170	0.012	NA	no run at these settings in the published table	no	NA	NA	NA	NA	132633	0.36	no	7:20.96	4020668	0
+SRR26465526	outlier	OXFORD_NANOPORE	2230369	auto	2214342	0.993	2143654	same detection sample; any move is the #47 sketch rework	yes	426.00	1338	31	23258	132633	0.84	no	0:34.39	1516080	0
+SRR26465560	outlier	OXFORD_NANOPORE	3198172	never	314829	0.098	314829	reproduces the published run	no	NA	NA	NA	NA	119614	0.60	no	1:09.02	2077568	0
+SRR26465560	outlier	OXFORD_NANOPORE	3198172	auto	2926832	0.915	2979472	same detection sample; any move is the #47 sketch rework	yes	165.00	1204	67	65360	119614	0.78	no	0:22.86	1158592	0
+SRR26465563	outlier	OXFORD_NANOPORE	3117753	never	1673370	0.537	NA	no run at these settings in the published table	no	NA	NA	NA	NA	93762	0.80	no	0:41.38	1297664	0
+SRR26465563	outlier	OXFORD_NANOPORE	3117753	auto	3043047	0.976	3055125	same detection sample; any move is the #47 sketch rework	yes	86.00	963	76	59957	93762	0.68	no	0:20.98	1216684	0
+SRR26715165	outlier	OXFORD_NANOPORE	2271101	never	928901	0.409	928901	reproduces the published run	no	NA	NA	NA	NA	39564	0.02	no	0:55.97	4120056	0
+SRR26715165	outlier	OXFORD_NANOPORE	2271101	auto	2130202	0.938	2104556	detection sample rose from 403 to 500 under the #48 floor	yes	47.00	500	13	15243	39564	NA	no	0:38.08	2738224	0
+SRR26715166	outlier	OXFORD_NANOPORE	2271523	never	489466	0.215	NA	no run at these settings in the published table	no	NA	NA	NA	NA	7473	NA	no	0:25.33	1075644	0
+SRR26715166	outlier	OXFORD_NANOPORE	2271523	auto	1881388	0.828	489466	detection sample rose from 69 to 500 under the #48 floor	yes	64.00	500	3	3756	7473	NA	yes	0:10.35	372544	0
+SRR8618952	control	PACBIO_SMRT	4907789	never	5890324	1.200	5890324	reproduces the published run	no	NA	NA	NA	NA	136128	3.52	no	0:06.71	1208916	0
+SRR8618952	control	PACBIO_SMRT	4907789	auto	5890324	1.200	5890324	same detection sample; any move is the #47 sketch rework	no	6.00	1368	NA	NA	136128	3.52	no	0:06.91	1229580	0

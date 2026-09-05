@@ -54,13 +54,14 @@ fn test_toy_bam_input() {
     let bam_path = std::path::Path::new("tests").join("data").join("toy.bam");
 
     if bam_path.exists() {
-        // What this test is for is that a BAM reaches the estimator, so it takes the depth
-        // machinery out of the way. Two things otherwise decide whether it passes, neither of them
-        // about BAM: ten target and five query reads out of the fixture's five hundred overlap
-        // only on a lucky seed, and the fixture is small enough that detection now samples every
-        // read of it and calls it skewed, which moves the estimate by about fivefold at a profile
-        // median depth of one. That second one is a real question about low-coverage input and it
-        // is filed separately, not something to settle inside a BAM test.
+        // What this test is for is that a BAM reaches the estimator. Five hundred reads cannot
+        // size a genome: most of the fifty query reads find no overlap among the hundred target
+        // reads, so the estimate rests on a handful of them and swings by seed, which is why the
+        // seed is pinned. The fixture is also small enough that detection samples every read of it
+        // and calls it skewed, so it normalizes against a profile median depth of one. That regime
+        // has since been measured on inputs whose genome size is known, and normalizing there
+        // lands closer to the truth, so this runs the default path instead of stepping around it.
+        // See `paper/corrections/issue56_low_depth_normalization.tsv`.
         cmd.arg(bam_path)
             .arg("-T")
             .arg("100")
@@ -68,8 +69,6 @@ fn test_toy_bam_input() {
             .arg("50")
             .arg("--seed")
             .arg("6")
-            .arg("--normalize")
-            .arg("never")
             .assert()
             .success();
     }

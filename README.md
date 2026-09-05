@@ -410,6 +410,15 @@ depth a profile normalizes against is measured over the minimizers detection sam
 drawn from every read instead would be mostly sequencing error seen in one read only, and its
 median would be the noise floor of the sketch rather than the input's coverage depth.
 
+Thin coverage does not hold normalization back. A shallow input gives a low median depth to
+normalize against, and at a median of one a read is kept or dropped on its own count coming out as
+two rather than three. Six skewed inputs with known genome sizes were subsampled until the median
+depth fell through three, two and one to see what that costs. Across the 46 resulting inputs,
+taking the median of three seeds each, `auto` landed at 0.64x to 0.99x of the true size and
+`--normalize never` at 0.004x to 0.24x; `auto` was nearer on every one of them. An even-depth
+input at the same median depth is still not called skewed, so shallow coverage on its own does not
+trigger normalization.
+
 A wide reported interval means the per-read estimates disagree. Uneven depth is one possible cause;
 repeats, sparse overlaps, or too few sampled reads can also widen it.
 

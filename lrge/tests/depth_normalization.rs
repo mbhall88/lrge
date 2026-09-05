@@ -5,16 +5,38 @@ use tempfile::NamedTempFile;
 const CHROMOSOME_SIZE: usize = 20_000;
 const ELEMENT_SIZE: usize = 2_000;
 const READ_LENGTH: usize = 800;
+const CHROMOSOME_READS: usize = 400;
+const ELEMENT_READS: usize = 4_000;
+
+/// A chromosome long enough that [`LOW_DEPTH_CHROMOSOME_READS`] of it is eight-fold coverage.
+const LOW_DEPTH_CHROMOSOME_SIZE: usize = 120_000;
+const LOW_DEPTH_READ_LENGTH: usize = 2_000;
+const LOW_DEPTH_CHROMOSOME_READS: usize = 500;
+/// Enough copies of the element that it is four fifths of the reads, as a plasmid can be.
+const LOW_DEPTH_ELEMENT_READS: usize = 2_000;
+/// One base in this many is replaced at random, which is about what a nanopore read carries.
+///
+/// The errors are what put these inputs at a profile median depth of one. Nearly every minimizer
+/// an error creates is seen in the one read that has it, and at this read length and error rate
+/// those singletons outnumber the minimizers the genome repeats, so the median count over the
+/// detection sample is one however deep the sequencing is. Error-free reads cannot reach that
+/// regime at a coverage the estimator can still work at: their minimizer counts are the coverage.
+const LOW_DEPTH_ERROR_DENOMINATOR: u64 = 10;
+/// Where the error generator starts, so an input is the same one every run.
+const LOW_DEPTH_ERROR_SEED: u64 = 99;
+
+/// One step of the generator the inputs are built from.
+fn next_draw(state: &mut u64) -> u64 {
+    *state = state
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1);
+    *state >> 32
+}
 
 fn pseudo_random_dna(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed;
     (0..len)
-        .map(|_| {
-            state = state
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1);
-            b"ACGT"[((state >> 32) & 3) as usize]
-        })
+        .map(|_| b"ACGT"[(next_draw(&mut state) & 3) as usize])
         .collect()
 }
 
@@ -24,29 +46,105 @@ fn circular_read(sequence: &[u8], start: usize) -> Vec<u8> {
         .collect()
 }
 
+/// A read of `source`, wrapping at its end, with about one base in
+/// [`LOW_DEPTH_ERROR_DENOMINATOR`] replaced at random.
+fn error_prone_read(source: &[u8], start: usize, state: &mut u64) -> Vec<u8> {
+    let mut read: Vec<u8> = (0..LOW_DEPTH_READ_LENGTH)
+        .map(|offset| source[(start + offset) % source.len()])
+        .collect();
+    for base in &mut read {
+        if next_draw(state).is_multiple_of(LOW_DEPTH_ERROR_DENOMINATOR) {
+            *base = b"ACGT"[(next_draw(state) & 3) as usize];
+        }
+    }
+    read
+}
+
+/// Write `count` reads cut from `source`, named `prefix0` onwards.
+///
+/// The starts step by a stride coprime with every source length here, so the reads walk the whole
+/// of it rather than piling up on one stretch.
+fn write_reads(
+    input: &mut NamedTempFile,
+    prefix: &str,
+    source: &[u8],
+    count: usize,
+    mut cut: impl FnMut(&[u8], usize) -> Vec<u8>,
+) {
+    for index in 0..count {
+        let read = cut(source, index * 137 % source.len());
+        writeln!(
+            input,
+            ">{prefix}{index}\n{}",
+            String::from_utf8(read).unwrap()
+        )
+        .unwrap();
+    }
+}
+
+/// What both low-coverage tests run under, less the normalization mode each appends.
+///
+/// `-vv` is what puts the profile's median depth in the log, which is the number these tests are
+/// really about.
+const LOW_DEPTH_ARGUMENTS: [&str; 8] = [
+    "-T",
+    "200",
+    "-Q",
+    "100",
+    "--seed",
+    "42",
+    "-vv",
+    "--normalize",
+];
+
+/// Error-prone reads of a chromosome at eight-fold coverage, plus `element_reads` reads of a
+/// high-copy element.
+///
+/// Ask for no element reads to get the even-depth version of the same input, which is what says
+/// whether a median depth of one is enough to call an ordinary input skewed by mistake.
+fn low_depth_reads(element_reads: usize) -> NamedTempFile {
+    let chromosome = pseudo_random_dna(LOW_DEPTH_CHROMOSOME_SIZE, 1);
+    let element = pseudo_random_dna(ELEMENT_SIZE, 2);
+    let mut state = LOW_DEPTH_ERROR_SEED;
+    let mut input = NamedTempFile::new().unwrap();
+
+    write_reads(
+        &mut input,
+        "chromosome",
+        &chromosome,
+        LOW_DEPTH_CHROMOSOME_READS,
+        |source, start| error_prone_read(source, start, &mut state),
+    );
+    write_reads(
+        &mut input,
+        "element",
+        &element,
+        element_reads,
+        |source, start| error_prone_read(source, start, &mut state),
+    );
+
+    input
+}
+
 fn skewed_reads() -> NamedTempFile {
     let chromosome = pseudo_random_dna(CHROMOSOME_SIZE, 1);
     let element = pseudo_random_dna(ELEMENT_SIZE, 2);
     let mut input = NamedTempFile::new().unwrap();
 
-    for index in 0..400 {
-        let read = circular_read(&chromosome, index * 137 % chromosome.len());
-        writeln!(
-            input,
-            ">chromosome{index}\n{}",
-            String::from_utf8(read).unwrap()
-        )
-        .unwrap();
-    }
-    for index in 0..4_000 {
-        let read = circular_read(&element, index * 137 % element.len());
-        writeln!(
-            input,
-            ">element{index}\n{}",
-            String::from_utf8(read).unwrap()
-        )
-        .unwrap();
-    }
+    write_reads(
+        &mut input,
+        "chromosome",
+        &chromosome,
+        CHROMOSOME_READS,
+        circular_read,
+    );
+    write_reads(
+        &mut input,
+        "element",
+        &element,
+        ELEMENT_READS,
+        circular_read,
+    );
 
     input
 }
@@ -248,4 +346,56 @@ fn the_estimate_does_not_depend_on_the_thread_count() {
             "at a {buffer} read buffer, one thread estimated {single_estimate}, four estimated {many_estimate}"
         );
     }
+}
+
+#[test]
+fn normalization_corrects_a_high_copy_element_at_a_median_depth_of_one() {
+    let input = low_depth_reads(LOW_DEPTH_ELEMENT_READS);
+    let (legacy, _) = run(
+        &input,
+        &[LOW_DEPTH_ARGUMENTS.as_slice(), &["never"]].concat(),
+    );
+    let (normalized, normalized_log) = run(
+        &input,
+        &[LOW_DEPTH_ARGUMENTS.as_slice(), &["auto"]].concat(),
+    );
+
+    // The trailing space keeps this off a median depth of ten or nineteen.
+    assert!(
+        normalized_log.contains("Median depth is 1 "),
+        "this input is meant to normalize against a median depth of one:\n{normalized_log}"
+    );
+    assert!(normalized_log.contains("Depth skew detected"));
+    assert!(legacy < 20_000, "legacy estimate was {legacy}");
+    assert!(
+        (80_000..=180_000).contains(&normalized),
+        "normalized estimate was {normalized}, against a chromosome of {LOW_DEPTH_CHROMOSOME_SIZE}"
+    );
+}
+
+/// A median depth of one is a small number to divide the high percentile by, so the question is
+/// whether an ordinary input gets called skewed down there by arithmetic alone. It does not.
+#[test]
+fn an_even_depth_input_is_not_normalized_at_a_median_depth_of_one() {
+    let input = low_depth_reads(0);
+    // Only a run that normalizes builds a profile, so the median this input would normalize
+    // against has to be read off a forced one.
+    let (_, forced_log) = run(
+        &input,
+        &[LOW_DEPTH_ARGUMENTS.as_slice(), &["always"]].concat(),
+    );
+    let (_, log) = run(
+        &input,
+        &[LOW_DEPTH_ARGUMENTS.as_slice(), &["auto"]].concat(),
+    );
+
+    // The trailing space keeps this off a median depth of ten or nineteen.
+    assert!(
+        forced_log.contains("Median depth is 1 "),
+        "this input is meant to normalize against a median depth of one:\n{forced_log}"
+    );
+    assert!(
+        log.contains("Depth skew not detected"),
+        "an even-depth input was called skewed:\n{log}"
+    );
 }

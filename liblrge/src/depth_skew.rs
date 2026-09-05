@@ -92,7 +92,24 @@ const DISTINCT_SAMPLE_SIZE: usize = 1 << 16;
 const MIN_DISTINCT_MINIMIZERS: usize = 128;
 // Express the 99.9th percentile as 999 parts per thousand to avoid float rounding.
 const HIGH_QUANTILE_PER_MILLE: usize = 999;
+// How far the high percentile has to run ahead of the median before an input is called skewed. A
+// low median is a small number to be dividing by, so a shallow input could in principle be called
+// skewed on arithmetic alone. Two even-depth inputs were taken down to a median depth of one to
+// see: the PacBio accession in the table below scores four there, and the synthetic input in
+// `lrge/tests/depth_normalization.rs` scores eight. Both are under this, by half the margin the
+// deeper inputs leave.
 const SKEW_THRESHOLD: f64 = 16.0;
+// Reads are kept down to about this many times the input's median depth.
+//
+// Nothing floors the median that is multiplied by, and that is deliberate. At a median depth of one
+// the target is two, so whether a read is kept turns on a read's own count coming out as two
+// rather than three, which reads like noise and is not. Six skewed inputs whose genome size is
+// known were subsampled until their median depth fell through three, two and one; normalizing was
+// nearer the truth on all 46 inputs that produced, a floor at a median depth of three would have
+// refused 27 of them, and the estimates are in
+// `paper/corrections/issue56_low_depth_normalization.tsv`. What survives that far down is the
+// ratio: the high-copy sequence that makes an input skewed is counted hundreds of times over where
+// the rest of the genome is counted once, and the ratio is all this rule reads.
 const RETENTION_TARGET_MULTIPLIER: u32 = 2;
 // Bases of sequence a profiling batch gathers before it is handed to a worker. Batching keeps the
 // channel out of the way of the sketch work, which is what the profiling pass is really doing.
