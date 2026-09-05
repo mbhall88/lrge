@@ -405,9 +405,13 @@ against the finished profile both use the thread count given to `--threads`. An 
 detected skew therefore costs little more than `--normalize never`.
 
 Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
-disable both detection and normalization. A wide reported interval means the per-read estimates
-disagree. Uneven depth is one possible cause; repeats, sparse overlaps, or too few sampled reads can
-also widen it.
+disable both detection and normalization. Forcing normalization still runs detection, because the
+depth a profile normalizes against is measured over the minimizers detection samples. A sample
+drawn from every read instead would be mostly sequencing error seen in one read only, and its
+median would be the noise floor of the sketch rather than the input's coverage depth.
+
+A wide reported interval means the per-read estimates disagree. Uneven depth is one possible cause;
+repeats, sparse overlaps, or too few sampled reads can also widen it.
 
 Normalization holds the reads it selects in memory until sampling finishes, which for a large
 request on long reads can be more memory than a machine has. `--max-read-buffer` caps that buffer,
