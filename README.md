@@ -430,13 +430,11 @@ trigger normalization.
 Both numbers this rests on, the skew score an input must reach and the multiple of median depth
 reads are kept down to, were then fitted on the paper's whole benchmark rather than left where
 argument had put them. All 3,370 accessions were rebuilt from ENA and estimated against every
-combination of eleven skew thresholds and six retention multipliers. Normalizing is what moves the
-result: it takes the mean |log2| error over the benchmark from 0.237 to 0.219, and the runs
-estimating under half their true size from 25 to 13, of which 11 come back to within 10% of the
-truth. Where the two constants sit inside a wide plateau does not move it. The best combination
-beats the shipped one by 0.0004 in mean error, on a bootstrap interval that includes zero, and
-which combination wins changes with the accuracy band. Both were left where they were. The
-procedure, the tables and the one place the benchmark and the low-depth inputs disagree are in
+combination of skew threshold and retention multiplier. Normalizing is what moves the result: it
+takes the mean |log2| error over the benchmark from 0.237 to 0.219, and the runs estimating under
+half their true size from 25 to 13, of which 11 come back to within 10% of the truth. Where the two
+constants sit inside a wide plateau does not move it, so both were left where they were. The
+procedure, the tables, and the one place the benchmark and the low-depth inputs disagree are in
 [`paper/corrections/README_issue36.md`](paper/corrections/README_issue36.md).
 
 Thirteen runs still estimate under half their true size, and depth normalization is not the

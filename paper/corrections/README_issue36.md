@@ -43,11 +43,16 @@ stock binary in `auto` mode and compared against their reconstructed values: 23 
 
 ## The grid
 
-Eleven thresholds (4 to 48) against six multipliers (1, 2, 3, 4, 6, 8), scored on all 3,370 runs:
+Thresholds against multipliers (1, 2, 3, 4, 6, 8), scored on all 3,370 runs. The grid sweeps
+seventeen thresholds from 0 to 100 plus a no-normalization baseline; the selection table narrows to
+the eleven from 4 to 48 that are plausible choices:
 
 - `issue36_benchmark_sweep.tsv` — one row per accession per variant, 23,590 rows. The raw material.
-- `issue36_constant_grid.tsv` — the grid, including a held-out third of the accessions.
-- `issue36_selection.tsv` — rescues against regressions, with a bootstrap over accessions.
+- `issue36_constant_grid.tsv` — the grid over all 3,370 runs.
+- `issue36_constant_grid_holdout.tsv` — the same grid, holding out every third accession as a test split.
+- `issue36_selection.tsv` — rescues against regressions, with two bootstraps over accessions:
+  `boot_net_*` on the rescue-minus-regression count, and `mean_err_vs_shipped` with `boot_err_*`
+  pairing each cell's mean |log2| error against the shipped pair.
 - `issue36_low_depth_multiplier.tsv` — #56's low-depth ladder, rebuilt across the six multipliers.
 - `issue36_timing_measured.tsv` — the stock binary timed in both modes, three replicates.
 - `issue36_failure_outcomes.tsv` — every run under half its true size, before or after.
@@ -60,19 +65,22 @@ error over the benchmark from 0.2372 to 0.2188, the runs estimating under half t
 25 to 13, and the runs landing within 10% of the truth from 1,978 to 2,006.
 
 **The constants sit on a plateau.** The best cell by mean error, a threshold of 24 with a multiplier
-of 1, beats the shipped pair by 0.0004, on a 95% bootstrap interval of [-0.0016, +0.0007]. Which
+of 1, beats the shipped pair by 0.00041, on a paired 95% bootstrap interval of [-0.00157, +0.00068]
+(`issue36_selection.tsv`, the `mean_err_vs_shipped` and `boot_err_*` columns). Which
 cell wins at all depends on the accuracy band you score on: the tightest bands favour a threshold of
 4 with a multiplier of 8, the widest a threshold of 6 with a multiplier of 4, and none of them beats
 the shipped pair by more than about one percent of the runs.
 
 **The benchmark alone would raise the multiplier, and it should not.** Going from 2 to 4 halves the
 already-correct runs that normalization pushes out of the band, 13 down to 6, with no loss of
-rescues. But all thirteen are estimates drifting up by 8 to 18 percent, none of them far, and a
-larger multiplier buys that by normalizing less. The benchmark holds three skewed runs with a
-profile median depth under four, so it cannot see what normalizing less costs where depth is thin.
-#56's ladder can, and rebuilt across the same six multipliers it is monotone: over 60 low-depth runs
-the estimate falls from 0.938 of the truth at a multiplier of 1, to 0.901 at 2, to 0.853 at 8. The
-shallow side is both better sampled and worse harmed, so the multiplier stays.
+rescues. But all thirteen are estimates drifting up between 2 and 18 percent, none of them landing
+more than 19 percent above the truth, and a larger multiplier buys that by normalizing less. The
+benchmark holds three skewed runs with a profile median depth under four, so it cannot see what
+normalizing less costs where depth is thin. #56's ladder can, and rebuilt across the same six
+multipliers it is monotone. Over the 60 ladder runs sitting at a profile median depth of 3 or less,
+the median estimate falls from 0.938 of the truth at a multiplier of 1, to 0.901 at 2, to 0.853 at
+8. Across all 96 engaged ladder runs the same slide is 0.927 to 0.904 to 0.865. The shallow side is
+both better sampled and worse harmed, so the multiplier stays.
 
 **The threshold and the multiplier are independent.** Every run in the low-depth ladder scores at
 least 58, so no candidate threshold would stop reaching them. The threshold's real effect is how
@@ -146,7 +154,7 @@ estimator cannot know. So a second gate on the skew score would not buy anything
 Measured on 23 accessions, three replicates each, stock binary. Where the detector does not fire the
 median cost is 1.01x wall clock and 1.02x peak memory, so detection is close to free, which is the
 work of #46, #47, #52 and #53. Where it does fire the run is usually *faster*, because
-normalization leaves fewer reads to overlap: the eight engaged accessions range from 0.32x to
+normalization leaves fewer reads to overlap: the seven engaged accessions range from 0.32x to
 2.74x.
 
 ## Reproducing it
