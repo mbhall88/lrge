@@ -42,9 +42,14 @@ pub struct Args {
     #[arg(long, value_name = "MODE", default_value = "scale")]
     pub shortfall: liblrge::Shortfall,
 
-    /// Exclude overlaps for internal matches
-    #[arg(short = 'F', long = "filter-contained")]
-    pub filter_contained: bool,
+    /// Exclude overlaps for internal matches [never, auto, always]
+    ///
+    /// An internal match is an alignment sitting in the middle of both reads with long unaligned
+    /// tails either side, which is what two reads sharing a repeat look like. `auto` measures how
+    /// much of the overlap evidence they account for and excludes them only when that share is high
+    /// enough to say the overlaps are driven by repeats. Given with no value, this is `always`.
+    #[arg(short = 'F', long = "filter-contained", value_name = "MODE", num_args = 0..=1, default_value = "never", default_missing_value = "always")]
+    pub filter_contained: liblrge::InternalFilter,
 
     /// Number of threads to use
     #[arg(short, long, value_name = "INT", default_value = "1")]
@@ -80,7 +85,9 @@ pub struct Args {
 
     /// Maximum overhang size to alignment length ratio for internal overlap filtering
     ///
-    /// Only meaningful alongside -F/--filter-contained, which this option requires.
+    /// This is what decides whether a mapping is an internal match, so it applies to `auto` as
+    /// well as `always`. Only meaningful alongside -F/--filter-contained, which this option
+    /// requires.
     #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, requires = "filter_contained", hide_short_help = true)]
     pub max_overhang_ratio: f32,
 
@@ -509,8 +516,41 @@ mod tests {
         let opts = Args::try_parse_from([BIN, "Cargo.toml", "-F", "--max-overhang-ratio", "0.05"])
             .unwrap();
 
-        assert!(opts.filter_contained);
+        assert_eq!(opts.filter_contained, liblrge::InternalFilter::Always);
         assert_eq!(opts.max_overhang_ratio, 0.05);
+    }
+
+    #[test]
+    fn cli_bare_filter_contained_still_means_filter_everything() {
+        // -F was a flag before it was a mode, and the runs that used it meant "always"
+        let opts = Args::try_parse_from([BIN, "Cargo.toml", "-F"]).unwrap();
+
+        assert_eq!(opts.filter_contained, liblrge::InternalFilter::Always);
+    }
+
+    #[test]
+    fn cli_accepts_internal_filter_modes() {
+        for (mode, expected) in [
+            ("never", liblrge::InternalFilter::Never),
+            ("auto", liblrge::InternalFilter::Auto),
+            ("always", liblrge::InternalFilter::Always),
+        ] {
+            let opts =
+                Args::try_parse_from([BIN, "Cargo.toml", "--filter-contained", mode]).unwrap();
+            assert_eq!(opts.filter_contained, expected);
+        }
+    }
+
+    #[test]
+    fn cli_rejects_an_invalid_internal_filter_mode() {
+        let error = Args::try_parse_from([BIN, "Cargo.toml", "-F", "sometimes"])
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("expected auto, always, or never"),
+            "error should say what the modes are, got: {error}"
+        );
     }
 
     #[test]
@@ -528,7 +568,7 @@ mod tests {
         // the default value must not trip the requirement - a plain run has to keep working
         let opts = Args::try_parse_from([BIN, "Cargo.toml"]).unwrap();
 
-        assert!(!opts.filter_contained);
+        assert_eq!(opts.filter_contained, liblrge::InternalFilter::Never);
         assert_eq!(opts.max_overhang_ratio, MAX_OVERHANG_RATIO.parse().unwrap());
     }
 }

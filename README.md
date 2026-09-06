@@ -196,22 +196,22 @@ Arguments:
   <INPUT>  Input FASTQ, FASTA, or unaligned BAM/CRAM/SAM file
 
 Options:
-  -o, --output <OUTPUT>      Output file for the estimate [default: -]
-  -T, --target <INT>         Target number of reads to use (for two-set strategy; default) [default: 10000]
-  -Q, --query <INT>          Query number of reads to use (for two-set strategy; default) [default: 5000]
-  -n, --num <INT>            Number of reads to use (for all-vs-all strategy)
-  -P, --platform <PLATFORM>  Sequencing platform of the reads [default: ont] [possible values: ont, pb]
-      --normalize <MODE>     Control depth-aware read normalization [default: auto]
-      --shortfall <MODE>     How to split an input too small to supply both read sets [scale, target] [default: scale]
-  -F, --filter-contained     Exclude overlaps for internal matches 
-  -t, --threads <INT>        Number of threads to use [default: 1]
-  -C, --keep-temp            Don't clean up temporary files
-  -D, --temp <DIR>           Temporary directory for storing intermediate files
-  -s, --seed <INT>           Random seed to use - making the estimate repeatable
-  -q, --quiet...             `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
-  -v, --verbose...           `-v` show debug output. `-vv` show trace output
-  -h, --help                 Print help (see more with '--help')
-  -V, --version              Print version
+  -o, --output <OUTPUT>            Output file for the estimate [default: -]
+  -T, --target <INT>               Target number of reads to use (for two-set strategy; default) [default: 10000]
+  -Q, --query <INT>                Query number of reads to use (for two-set strategy; default) [default: 5000]
+  -n, --num <INT>                  Number of reads to use (for all-vs-all strategy)
+  -P, --platform <PLATFORM>        Sequencing platform of the reads [default: ont] [possible values: ont, pb]
+      --normalize <MODE>           Control depth-aware read normalization [default: auto]
+      --shortfall <MODE>           How to split an input too small to supply both read sets [scale, target] [default: scale]
+  -F, --filter-contained [<MODE>]  Exclude overlaps for internal matches [never, auto, always] [default: never]
+  -t, --threads <INT>              Number of threads to use [default: 1]
+  -C, --keep-temp                  Don't clean up temporary files
+  -D, --temp <DIR>                 Temporary directory for storing intermediate files
+  -s, --seed <INT>                 Random seed to use - making the estimate repeatable
+  -q, --quiet...                   `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
+  -v, --verbose...                 `-v` show debug output. `-vv` show trace output
+  -h, --help                       Print help (see more with '--help')
+  -V, --version                    Print version
 ```
 
 ### Full usage
@@ -322,9 +322,13 @@ Arguments:
 
           [default: scale]
 
-  -F, --filter-contained
-          Exclude overlaps for internal matches
+  -F, --filter-contained [<MODE>]
+          Exclude overlaps for internal matches [never, auto, always]
           
+          An internal match is an alignment sitting in the middle of both reads with long unaligned tails either side, which is what two reads sharing a repeat look like. `auto` measures how much of the overlap evidence they account for and excludes them only when that share is high enough to say the overlaps are driven by repeats. Given with no value, this is `always`.
+          
+          [default: never]
+
   -t, --threads <INT>
           Number of threads to use
 
@@ -358,7 +362,7 @@ Arguments:
       --max-overhang-ratio <FLOAT>
           Maximum overhang size to alignment length ratio for internal overlap filtering
 
-          Only meaningful alongside -F/--filter-contained, which this option requires.
+          This is what decides whether a mapping is an internal match, so it applies to `auto` as well as `always`. Only meaningful alongside -F/--filter-contained, which this option requires.
 
           [default: 0.2]
 
@@ -445,7 +449,7 @@ does. One run, `SRR13009132`, is made worse: normalization drops 79% of its read
 0.66x to 0.48x.
 
 A wide reported interval means the per-read estimates disagree. Uneven depth is one possible cause;
-repeats, sparse overlaps, or too few sampled reads can also widen it.
+repeats, sparse overlaps, or too few sampled reads can also widen it. Repeats have their own correction, below.
 
 Normalization holds the reads it selects in memory until sampling finishes, which for a large
 request on long reads can be more memory than a machine has. `--max-read-buffer` caps that buffer,
@@ -456,6 +460,45 @@ sequences, then reads the input a second time to write them out: less memory, on
 paths pick the same reads for a given seed, so the cap changes what a run costs while the estimate
 stays the same. The projection comes from the mean read length, so a run can
 still buffer past the cap; when it does, it says so and by how much.
+
+### Repeat-driven overlaps
+
+Depth normalization corrects an input whose reads come disproportionately from one part of the
+genome. It cannot correct an input whose *overlaps* come disproportionately from repeats. Two reads
+carrying the same repeat align over it with long unaligned tails hanging off either end, which is
+nothing like the end-to-end overlap two reads from the same locus make. An estimate divides the
+target count by the read's overlap count, so counting those alignments as overlaps drives the
+estimate down, and on a repeat-rich input it drives it down several fold.
+
+`-F/--filter-contained` drops them. Turning it on for every input is not the answer: filtering can
+only remove overlaps, so it can only push estimates up. Over 27 accessions whose true size is
+known it moved every one of them up, by 8% on the mildest and more than sevenfold on the worst, and
+the 13 that were already within 10% of the truth all ended up 8 to 24 percent too high.
+
+So `-F auto` measures instead. The pass that collects overlaps can count what the filter would have
+discarded without discarding it, which costs a second set of overlap identities per query read and
+no extra mapping. On those 27 accessions the two populations separate: every run already within 10%
+of the truth has internal matches accounting for at most 61% of its overlaps, while six of the seven
+the filter rescues are at 78% or more. LRGE filters above 70%, in the middle of that gap, and says
+so at WARN level when it does.
+
+| mode | within 10% of the truth | under half the true size |
+|---|---|---|
+| `-F never` (the default) | 13 | 12 |
+| `-F always` | 9 | 1 |
+| `-F auto` | 19 | 4 |
+
+`auto` engaged on eight of the 27 and disturbed none of the thirteen that were already right. Bare
+`-F` still means `always`, which is what it has always meant.
+
+The default is `never`, and stays there until the rule is fitted on something broader. Those 27
+accessions were collected because they were hard, not because they were representative, so they say
+that the signal exists and separates cleanly, not where the threshold belongs across a whole
+benchmark. The measurements are in
+[`paper/corrections/README_issue36.md`](paper/corrections/README_issue36.md).
+
+`--max-overhang-ratio` sets how much overhang makes an alignment an internal match, and applies to
+`auto` as much as to `always`.
 
 ### Two-set strategy
 

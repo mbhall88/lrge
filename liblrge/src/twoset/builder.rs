@@ -1,4 +1,4 @@
-use crate::{Normalization, Platform, Shortfall};
+use crate::{InternalFilter, Normalization, Platform, Shortfall};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ pub struct Builder {
     target_num_bases: usize,
     query_num_reads: usize,
     query_num_bases: usize,
-    remove_internal: bool,
+    internal_filter: InternalFilter,
     max_overhang_ratio: f32,
     use_min_ref: bool,
     tmpdir: PathBuf,
@@ -31,7 +31,7 @@ impl Default for Builder {
             target_num_bases: 0,
             query_num_reads: DEFAULT_QUERY_NUM_READS,
             query_num_bases: 0,
-            remove_internal: false,
+            internal_filter: InternalFilter::default(),
             max_overhang_ratio: DEFAULT_MAX_OVERHANG_RATIO,
             use_min_ref: false,
             tmpdir,
@@ -93,13 +93,13 @@ impl Builder {
         self
     }
 
-    /// Set option for removing the overlaps representing internal matches, and the maximum
-    /// ratio of overhang to alignment length above which a mapping counts as one.
+    /// Set how overlaps representing internal matches are handled, and the maximum ratio of
+    /// overhang to alignment length above which a mapping counts as one.
     ///
-    /// The ratio is stored whether or not the filter is enabled, so it survives being set
-    /// before the filter is turned on.
-    pub fn remove_internal(mut self, filter_contained: bool, ratio: f32) -> Self {
-        self.remove_internal = filter_contained;
+    /// The ratio is stored whatever the mode, so it survives being set before the filter is
+    /// turned on.
+    pub fn internal_filter(mut self, mode: InternalFilter, ratio: f32) -> Self {
+        self.internal_filter = mode;
         self.max_overhang_ratio = ratio;
         self
     }
@@ -223,7 +223,7 @@ impl Builder {
             target_num_bases: self.target_num_bases,
             query_num_reads: self.query_num_reads,
             query_num_bases: self.query_num_bases,
-            remove_internal: self.remove_internal,
+            internal_filter: self.internal_filter,
             max_overhang_ratio: self.max_overhang_ratio,
             use_min_ref: self.use_min_ref,
             tmpdir: self.tmpdir,
@@ -242,30 +242,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remove_internal_keeps_the_ratio_when_the_filter_is_off() {
+    fn internal_filter_keeps_the_ratio_when_the_filter_is_off() {
         // the ratio is an independent setting - storing it only when the filter is enabled
         // silently discards a caller's choice
         let strategy = Builder::new()
-            .remove_internal(false, 0.05)
+            .internal_filter(InternalFilter::Never, 0.05)
             .build("reads.fq");
 
-        assert!(!strategy.remove_internal);
+        assert_eq!(strategy.internal_filter, InternalFilter::Never);
         assert_eq!(strategy.max_overhang_ratio, 0.05);
     }
 
     #[test]
-    fn remove_internal_keeps_the_ratio_when_the_filter_is_on() {
-        let strategy = Builder::new().remove_internal(true, 0.05).build("reads.fq");
+    fn internal_filter_keeps_the_ratio_in_every_mode() {
+        for mode in [
+            InternalFilter::Never,
+            InternalFilter::Auto,
+            InternalFilter::Always,
+        ] {
+            let strategy = Builder::new().internal_filter(mode, 0.05).build("reads.fq");
 
-        assert!(strategy.remove_internal);
-        assert_eq!(strategy.max_overhang_ratio, 0.05);
+            assert_eq!(strategy.internal_filter, mode);
+            assert_eq!(strategy.max_overhang_ratio, 0.05);
+        }
     }
 
     #[test]
-    fn remove_internal_defaults_to_off_with_the_default_ratio() {
+    fn internal_filter_defaults_to_off_with_the_default_ratio() {
         let strategy = Builder::new().build("reads.fq");
 
-        assert!(!strategy.remove_internal);
+        assert_eq!(strategy.internal_filter, InternalFilter::Never);
         assert_eq!(strategy.max_overhang_ratio, DEFAULT_MAX_OVERHANG_RATIO);
     }
 }

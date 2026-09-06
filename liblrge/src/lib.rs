@@ -130,6 +130,7 @@ pub mod ava;
 pub(crate) mod depth_skew;
 pub mod error;
 pub mod estimate;
+pub(crate) mod internal_match;
 pub(crate) mod io;
 pub(crate) mod minimap2;
 pub(crate) mod read_selection;
@@ -189,6 +190,63 @@ impl FromStr for Normalization {
             "never" => Ok(Self::Never),
             _ => Err(format!(
                 "invalid normalization mode '{value}'; expected auto, always, or never"
+            )),
+        }
+    }
+}
+
+/// Controls whether overlaps that are internal matches are excluded from the estimate.
+///
+/// An internal match is an alignment that sits in the middle of both reads with long unaligned
+/// tails on either end, which is what two reads sharing a repeat look like and not what two reads
+/// from the same locus look like. Excluding them is the right correction for an input whose
+/// overlaps are dominated by repeats, and the wrong one everywhere else: it can only remove
+/// overlaps, and a per-read estimate divides by the overlap count, so it can only push the
+/// estimate up.
+///
+/// [`Auto`][Self::Auto] tells those two cases apart by measuring, during the one mapping pass,
+/// how much of the overlap evidence the filter would have taken away.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum InternalFilter {
+    /// Keep every overlap. This is what LRGE has always done unless asked otherwise.
+    #[default]
+    Never,
+    /// Measure how much of the overlap evidence is internal matches, and exclude them only when
+    /// that share is high enough to say the overlaps are driven by repeats.
+    ///
+    /// Both counts come out of the one mapping pass, so this costs a second set of overlap
+    /// identities per query read and nothing else.
+    Auto,
+    /// Exclude every internal match, whatever the input looks like.
+    Always,
+}
+
+impl InternalFilter {
+    /// Whether the run has yet to choose, and so has to carry both overlap counts through the
+    /// mapping pass to have the one it does not pick.
+    pub(crate) fn is_deciding(self) -> bool {
+        self == Self::Auto
+    }
+
+    /// Whether the mapping pass has to test each overlap for being an internal match at all.
+    ///
+    /// True in every mode but [`Never`][Self::Never]: [`Auto`][Self::Auto] needs the test to
+    /// measure with, even before it knows whether it will act on it.
+    pub(crate) fn evaluates_internal_matches(self) -> bool {
+        self != Self::Never
+    }
+}
+
+impl FromStr for InternalFilter {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "always" => Ok(Self::Always),
+            "never" => Ok(Self::Never),
+            _ => Err(format!(
+                "invalid internal-match filter mode '{value}'; expected auto, always, or never"
             )),
         }
     }

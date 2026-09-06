@@ -9,6 +9,11 @@ benchmark said.
 The short answer: neither moves. Normalizing at all is a large, reproducible win, and where the
 constants sit inside a wide plateau is not.
 
+What came out of the same runs is that the failures normalization leaves behind have a different
+cause, that the cause is measurable during the overlap pass, and that `-F` can therefore be switched
+on per run rather than per user. That is the second half of this document, from
+[Switching the filter on from that measurement](#switching-the-filter-on-from-that-measurement).
+
 ## The runs
 
 The paper's benchmark is 3,370 bacterial long-read runs with a matched RefSeq assembly. Its
@@ -151,34 +156,57 @@ unchanged against the stock binary). The statistic that matters is the fraction 
 overlaps that internal matches account for, `overlap_drop_frac` in
 `issue36_internal_match_probe.tsv`.
 
-It separates the two populations. The eight runs where `-F` gains most all sit above 0.77, reaching
-0.945 on `SRR30162149`; every run that normalization alone already put inside the band sits at 0.61
-or below. Switching `-F` on above a threshold in that gap beats both fixed choices on these 27
-accessions:
+It separates the two populations. Every run that normalization alone already put inside the band
+sits at 0.61 or below, and six of the seven the filter rescues sit at 0.78 or above, reaching 0.945
+on `SRR30162149`. The seventh, `SRR24489322`, sits at 0.424, in among the quiet runs, and no
+threshold can take it without taking correct runs too. Across the whole of the gap between the two
+populations the outcome is the same, so the constant went in the middle of it, at 0.7.
 
-| rule | within 0.9-1.1x | under 0.5x |
+## Switching the filter on from that measurement
+
+The rule was then implemented rather than left as a prototype. `-F` takes a mode, as `--normalize`
+does: `never` (the default, and what LRGE did before), `always` (what bare `-F` has always meant),
+and `auto`. Under `auto` the mapping pass carries two overlap counts per query read, one with the
+internal matches and one without, and picks between them once it has seen how much of the evidence
+they account for. Both counts come out of the one pass, so nothing is mapped twice.
+
+The same 27 accessions were then run through the shipped binary in all three modes, at the paper's
+invocation and with `--normalize auto` throughout. The runs are in `issue36_dynamic_filter.tsv`.
+
+| mode | within 0.9-1.1x | under 0.5x |
 |---|---|---|
-| `auto`, never `-F` (ships today) | 13 | 12 |
-| `auto`, always `-F` | 9 | 1 |
-| `auto`, `-F` above a 0.62 to 0.75 drop fraction | 19 | 4 |
+| `-F never` (the default) | 13 | 12 |
+| `-F always` | 9 | 1 |
+| `-F auto` | 19 | 4 |
 
-No run that was already inside the band gets filtered at any threshold from 0.62 up, which is what
-keeps the overshoot away, and the result is flat across that range rather than balanced on a point.
-The four runs still failing under the rule are the ones that need `-F` but do not look like it:
-`SRR10259778` gains 3.79x from filtering on a drop fraction of only 0.26.
+`auto` engages on eight runs, and they are the eight the probe said it would. It disturbs none of
+the thirteen that were already inside the band, which is what keeps the 8 to 24 percent overshoot
+away. Two things follow from that and are worth stating plainly: the mechanism is measured on the
+shipped code and not inferred from an instrumented one, and the modes that existed before are
+untouched, because `never` and `always` reproduce the stock binary's estimate to the base pair on
+all 27 accessions.
 
-This is a prototype on 27 outlier-enriched accessions, not a fitted constant. It says the signal
-exists and is cheap, not where the threshold belongs; that needs the full benchmark, and the
-benchmark's reads would have to be rebuilt again to get it.
+Four runs still fail under `auto`. They need the filter without looking like it: `SRR24489322`
+(0.419 to 0.945 under `always`, drop fraction 0.424) and `SRR10259778` (0.438 to 1.660, drop
+fraction 0.259) both sit in among the quiet runs on this statistic. The other two, `SRR13183064` and
+`SRR13183067`, are the pair that genomescope and raven also miss.
 
-This is also the limit on the fit above. The threshold and the multiplier were swept on the default
-path, without `-F`, because that is the invocation the published benchmark used. The plateau is a
-plateau for that path. If `-F` ever becomes the default, both constants have to be swept again.
+The threshold is fitted on 27 outlier-enriched accessions, not on the benchmark. Those 27 are the
+set collected for #29, chosen to be rich in the failures depth normalization leaves behind, so the
+counts above describe them and not LRGE in general: on a random sample of the benchmark almost every
+run would sit in the quiet population and the rule would do nothing. What the 27 establish is that
+the signal exists, is free to compute, and separates cleanly where it has been looked at. Where the
+threshold belongs across the whole benchmark is #38's question, and answering it means rebuilding
+the benchmark's reads again. That is also why `auto` is not the default.
 
-Two caveats on this table specifically. The 27 accessions are the outlier-enriched set collected for
-#29, not a sample of the benchmark, so the counts above describe them and not LRGE in general. And 8
-of the 27 hit the 1 Gbp cap, where the read set on disk is not quite the one the benchmark rebuilt,
-so their unnormalized values differ slightly from `issue36_benchmark_sweep.tsv`.
+Eight of the 27 hit the 1 Gbp cap, where the read set on disk is not quite the one the benchmark
+rebuilt, so their values differ slightly from `issue36_benchmark_sweep.tsv`.
+
+### A limit this puts on the fit above
+
+The threshold and the multiplier were swept on the default path, without `-F`, because that is the
+invocation the published benchmark used. The plateau is a plateau for that path. If `-F auto` ever
+becomes the default, both constants have to be swept again.
 
 ## What separates a rescue from a nuisance
 
@@ -224,5 +252,10 @@ normalization leaves fewer reads to overlap: the seven engaged accessions range 
 The harness is `/scratch/user/uqmhal11/lrge-issue36`: a Snakemake workflow whose `download` rule is
 the paper's, an `estimate` rule making the seven runs per accession, and `analyse.py`, `select.py`
 and `detail.py` over the result. Reads are `temp()`, so the benchmark never sits on disk at once.
+
+The filter work runs off the 27 accessions kept on disk from #29 instead, so it needs no downloads:
+`filter/sweep.sh` for the four stock arms, `filter/probe.sh` and `filter/probe.patch` for the
+instrumented pass, and `dynamic/sweep.sh` with `dynamic/summarise.py` for the three arms of the
+shipped binary.
 
 [#36]: https://github.com/mbhall88/lrge/issues/36
