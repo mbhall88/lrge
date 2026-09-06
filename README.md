@@ -408,7 +408,9 @@ starts to turn on which reads happened to be drawn rather than on the input.
 Building the full depth profile that normalization needs costs a second pass over the input, so LRGE
 only takes that pass once it has decided to normalize. That pass and the scoring of every read
 against the finished profile both use the thread count given to `--threads`. An input with no
-detected skew therefore costs little more than `--normalize never`.
+detected skew therefore costs little more than `--normalize never`: over the benchmark accessions
+where the detector does not fire, `auto` runs at 1.01x the wall clock and 1.02x the peak memory.
+Where it does fire the run is usually quicker, because normalization leaves fewer reads to overlap.
 
 Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
 disable both detection and normalization. Forcing normalization still runs detection, because the
@@ -424,6 +426,25 @@ taking the median of three seeds each, `auto` landed at 0.64x to 0.99x of the tr
 `--normalize never` at 0.004x to 0.24x; `auto` was nearer on every one of them. An even-depth
 input at the same median depth is still not called skewed, so shallow coverage on its own does not
 trigger normalization.
+
+Both numbers this rests on, the skew score an input must reach and the multiple of median depth
+reads are kept down to, were then fitted on the paper's whole benchmark rather than left where
+argument had put them. All 3,370 accessions were rebuilt from ENA and estimated against every
+combination of eleven skew thresholds and six retention multipliers. Normalizing is what moves the
+result: it takes the mean |log2| error over the benchmark from 0.237 to 0.219, and the runs
+estimating under half their true size from 25 to 13, of which 11 come back to within 10% of the
+truth. Where the two constants sit inside a wide plateau does not move it. The best combination
+beats the shipped one by 0.0004 in mean error, on a bootstrap interval that includes zero, and
+which combination wins changes with the accuracy band. Both were left where they were. The
+procedure, the tables and the one place the benchmark and the low-depth inputs disagree are in
+[`paper/corrections/README_issue36.md`](paper/corrections/README_issue36.md).
+
+Thirteen runs still estimate under half their true size, and depth normalization is not the
+mechanism that will fix them. Nine keep more than 90% of their reads through normalization, so
+there is almost nothing for it to remove, and on eight of those raven lands within 5% of the truth
+from the same reads. Two are thin enough that genomescope and raven miss them as badly as LRGE
+does. One run, `SRR13009132`, is made worse: normalization drops 79% of its reads and takes it from
+0.66x to 0.48x.
 
 A wide reported interval means the per-read estimates disagree. Uneven depth is one possible cause;
 repeats, sparse overlaps, or too few sampled reads can also widen it.

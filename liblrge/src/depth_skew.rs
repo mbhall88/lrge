@@ -98,6 +98,22 @@ const HIGH_QUANTILE_PER_MILLE: usize = 999;
 // see: the PacBio accession in the table below scores four there, and the synthetic input in
 // `lrge/tests/depth_normalization.rs` scores eight. Both are under this, by half the margin the
 // deeper inputs leave.
+//
+// This was then fitted on the paper's benchmark rather than left at the value intuition picked.
+// All 3,370 accessions were rebuilt from ENA and estimated seven times each, and every combination
+// of eleven thresholds and six retention multipliers was scored on them; the procedure and the
+// tables are described in `paper/corrections/README_issue36.md`. What the sweep shows is a
+// plateau. Normalizing at all is what matters, taking the mean |log2| error over the benchmark
+// from 0.2372 to 0.2188 and the runs estimating under half their true size from 25 to 13. Where on
+// the plateau the threshold sits does not: the best cell by mean error beats this one by 0.0004,
+// on a 95% bootstrap interval of [-0.0016, +0.0007], and which cell wins at all changes with the
+// accuracy band you score on. So this stays where it was, now with 3,370 runs behind it.
+//
+// What the threshold does control is how much of the benchmark gets touched to fix the few runs
+// that need it: 186 runs here, against 73 at a threshold of 24 for the same 13 rescues. Raising it
+// would not cost the low-depth inputs the multiplier below is set for, which score 58 at the very
+// least. It was left alone because it also gives up the borderline runs normalization lifts into
+// the band, which is the half of the trade that does not show up in a count of regressions.
 const SKEW_THRESHOLD: f64 = 16.0;
 // Reads are kept down to about this many times the input's median depth.
 //
@@ -110,6 +126,18 @@ const SKEW_THRESHOLD: f64 = 16.0;
 // `paper/corrections/issue56_low_depth_normalization.tsv`. What survives that far down is the
 // ratio: the high-copy sequence that makes an input skewed is counted hundreds of times over where
 // the rest of the genome is counted once, and the ratio is all this rule reads.
+//
+// The benchmark sweep described above pulls the other way on this, and it is worth saying why it
+// did not win. Raising the multiplier to four halves the number of already-correct benchmark runs
+// that normalization pushes out of the band, from thirteen to six, and costs no rescues. But every
+// one of those thirteen is an estimate drifting up by eight to eighteen percent, none of them far,
+// and a larger multiplier buys that by normalizing less. Where normalizing less is expensive is
+// exactly where the benchmark is thinnest: it holds three skewed runs with a profile median depth
+// under four. So #56's ladder was rebuilt across the same six multipliers, and over 60 low-depth
+// runs the estimate falls away monotonically as the multiplier rises, from 0.938 of the truth at
+// one, to 0.901 here, to 0.853 at eight. The multiplier trades under-correcting the shallow
+// against over-correcting the deep, and the shallow side is both better sampled and worse harmed.
+// The runs are in `paper/corrections/issue36_low_depth_multiplier.tsv`.
 const RETENTION_TARGET_MULTIPLIER: u32 = 2;
 // Bases of sequence a profiling batch gathers before it is handed to a worker. Batching keeps the
 // channel out of the way of the sketch work, which is what the profiling pass is really doing.
