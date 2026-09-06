@@ -58,6 +58,7 @@ the eleven from 4 to 48 that are plausible choices:
 - `issue36_failure_outcomes.tsv` — every run under half its true size, before or after.
 - `issue36_movers.tsv` — the 186 runs the detector fires on, classed by what happened to them.
 - `issue36_filter_contained.tsv` — 27 accessions with and without `-F`, crossed with normalization.
+- `issue36_internal_match_probe.tsv` — what `-F` would remove, measured without removing it.
 
 ## What it says
 
@@ -139,6 +140,36 @@ It cannot simply be turned on, because it raises every estimate. The per-run eff
 above 1.1x, by 8 to 24 percent. So the filter is not miscalibrated in some runs and right in others:
 it shifts the whole scale, and the estimator's constants were derived without it. Making it the
 default is a recalibration, which is #38's subject, not a flag flip.
+
+### Whether a run needs the filter can be read off one unfiltered pass
+
+`-F` cannot be the default because it moves every estimate, but it does not have to be all or
+nothing. Whether a run needs it is measurable before deciding, and cheaply, because `is_internal`
+is arithmetic on fields the mapping already carries. A throwaway build counted what `-F` would have
+discarded on runs that did not discard it (`filter/probe.patch` in the harness; estimates verified
+unchanged against the stock binary). The statistic that matters is the fraction of a run's unique
+overlaps that internal matches account for, `overlap_drop_frac` in
+`issue36_internal_match_probe.tsv`.
+
+It separates the two populations. The eight runs where `-F` gains most all sit above 0.77, reaching
+0.945 on `SRR30162149`; every run that normalization alone already put inside the band sits at 0.61
+or below. Switching `-F` on above a threshold in that gap beats both fixed choices on these 27
+accessions:
+
+| rule | within 0.9-1.1x | under 0.5x |
+|---|---|---|
+| `auto`, never `-F` (ships today) | 13 | 12 |
+| `auto`, always `-F` | 9 | 1 |
+| `auto`, `-F` above a 0.62 to 0.75 drop fraction | 19 | 4 |
+
+No run that was already inside the band gets filtered at any threshold from 0.62 up, which is what
+keeps the overshoot away, and the result is flat across that range rather than balanced on a point.
+The four runs still failing under the rule are the ones that need `-F` but do not look like it:
+`SRR10259778` gains 3.79x from filtering on a drop fraction of only 0.26.
+
+This is a prototype on 27 outlier-enriched accessions, not a fitted constant. It says the signal
+exists and is cheap, not where the threshold belongs; that needs the full benchmark, and the
+benchmark's reads would have to be rebuilt again to get it.
 
 This is also the limit on the fit above. The threshold and the multiplier were swept on the default
 path, without `-F`, because that is the invocation the published benchmark used. The plateau is a
