@@ -475,12 +475,31 @@ DRR213976 seed 4556. From 1:1 onward the reported interval also narrows against 
 SRR12247681 from 90 times the estimate down to 1.9 times, so the higher estimates are the better
 determined ones as well; the one step it widens on is the first, out of the old rule's split.
 
-Splitting further toward the target than the request asked for helped further still, so the ratio
-the request asks for is a floor on what is available rather than the best split. Settling where the
-split should sit is a calibration question over the whole benchmark, which
-[issue #36](https://github.com/mbhall88/lrge/issues/36) owns, as is whether a floor on expected
-overlaps per query read is a better rule than a ratio at all. The runs behind this paragraph are in
-`paper/corrections/issue60_split_sweep.tsv`.
+Splitting further toward the target than the request asked for helped further still on those three
+accessions, all of which sit deep in the regime where the estimator is already failing. A wider
+sweep has since put a boundary on that: 27 accessions with known genome sizes, three pool sizes and
+both normalization modes, 2,328 runs in `paper/corrections/issue63_split_calibration.tsv`.
+
+The split only matters when the pool is far below the request. With normalization on and a pool of
+about 7,500 reads, the spread across splits is three times the spread across seeds, and pushing from
+the requested 2:1 to 4:1 lands nearer the truth on 19 of the 27. At a pool of about 15,000, and on
+the whole input, that spread falls to between one and two times the seed spread and the same
+comparison comes out 13 of 23 and 11 of 23. Asking for 20,000 target reads against 5,000 query,
+rather than dividing 15,000 differently, moves the median estimate by 0.002.
+
+So the defaults stay where they are, and the shortfall rule keeps the ratio it was asked for rather
+than leaning past it. What is left to gain is under half the seed-to-seed spread, it peaks at 4:1
+and falls back at 8:1, and taking it would mean overriding an explicit `-Q`. Expected overlaps per
+query read, the quantity the estimator depends on, does not predict where the split matters either:
+its correlation with the gain from rebalancing is 0.28 where the pool is starved and under 0.13
+everywhere else, so a floor on it would not be a better rule than a ratio.
+
+Two limits on that. These accessions were collected for
+[issue #29](https://github.com/mbhall88/lrge/issues/29) because they estimate badly, so they are not
+a sample of ordinary inputs and the figures above are only meant as comparisons between splits
+within one accession. They also span 2.2 Mbp to 11.1 Mbp and are all bacterial, while the read
+counts in [the paper][doi] move from 2:1 for bacteria to 20:1 for *H. sapiens*, so none of this says
+the split can be ignored at eukaryotic genome sizes.
 
 Across the 17 benchmark accessions the change reaches only `SRR26715166`, the one input that cannot
 supply 15,000 reads. Its estimate moves from 0.828x to 0.912x of the true size under

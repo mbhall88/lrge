@@ -204,6 +204,12 @@ impl FromStr for Normalization {
 /// genome size is known was divided five ways on three seeds each: taking the median of the three
 /// seeds, the estimate rose with the target's share at every step on all three, and the runs are
 /// in `paper/corrections/issue60_split_sweep.tsv`.
+///
+/// How far to divide is a separate question from which way, and it has been measured. Over 27
+/// accessions at three pool sizes, the split only moves the estimate while the pool is far below
+/// the request, and even there leaning past the requested ratio gains less than the spread between
+/// seeds. That is why this keeps the ratio it was asked for rather than picking one:
+/// `paper/corrections/issue63_split_calibration.tsv`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Shortfall {
     /// Scale both sets down together, keeping the requested target:query ratio.
