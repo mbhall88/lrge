@@ -1,4 +1,4 @@
-use crate::{Normalization, Platform};
+use crate::{Normalization, Platform, Shortfall};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -19,6 +19,7 @@ pub struct Builder {
     seed: Option<u64>,
     platform: Platform,
     normalization: Normalization,
+    shortfall: Shortfall,
     max_read_buffer: u64,
 }
 
@@ -38,6 +39,7 @@ impl Default for Builder {
             seed: None,
             platform: Platform::default(),
             normalization: Normalization::default(),
+            shortfall: Shortfall::default(),
             max_read_buffer: DEFAULT_MAX_READ_BUFFER,
         }
     }
@@ -59,7 +61,7 @@ impl Builder {
 
     /// Set the number of target reads for the strategy. By default, this is [`DEFAULT_TARGET_NUM_READS`].
     ///
-    /// The target reads are the (generally) smaller set of reads that the query reads are
+    /// The target reads are the (generally) larger set of reads that the query reads are
     /// overlapped against.
     ///
     /// # Examples
@@ -76,7 +78,7 @@ impl Builder {
 
     /// Set the number of query reads for the strategy. By default, this is [`DEFAULT_QUERY_NUM_READS`].
     ///
-    /// The query reads are the (generally) larger set of reads that are overlapped against the
+    /// The query reads are the (generally) smaller set of reads that are overlapped against the
     /// target reads.
     ///
     /// # Examples
@@ -171,6 +173,21 @@ impl Builder {
         self
     }
 
+    /// Set how an input too small to supply both read sets is divided between them. The default
+    /// is [`Shortfall::Scale`], which keeps the requested target:query ratio.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use liblrge::{twoset::Builder, Shortfall};
+    ///
+    /// let builder = Builder::new().shortfall(Shortfall::Target);
+    /// ```
+    pub fn shortfall(mut self, shortfall: Shortfall) -> Self {
+        self.shortfall = shortfall;
+        self
+    }
+
     /// Set the cap on the bytes of selected reads that depth normalization may hold in memory
     /// at once. By default, this is [`DEFAULT_MAX_READ_BUFFER`].
     ///
@@ -214,6 +231,7 @@ impl Builder {
             seed: self.seed,
             platform: self.platform,
             normalization: self.normalization,
+            shortfall: self.shortfall,
             max_read_buffer: self.max_read_buffer,
         }
     }

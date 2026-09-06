@@ -81,6 +81,7 @@ fn main() -> Result<()> {
             .tmpdir(tmpdir.path())
             .seed(args.seed)
             .normalization(args.normalize)
+            .shortfall(args.shortfall)
             .max_read_buffer(args.max_read_buffer);
 
         Box::new(builder.build(args.input))

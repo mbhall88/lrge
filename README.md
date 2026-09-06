@@ -202,6 +202,7 @@ Options:
   -n, --num <INT>            Number of reads to use (for all-vs-all strategy)
   -P, --platform <PLATFORM>  Sequencing platform of the reads [default: ont] [possible values: ont, pb]
       --normalize <MODE>     Control depth-aware read normalization [default: auto]
+      --shortfall <MODE>     How to split an input too small to supply both read sets [scale, target] [default: scale]
   -F, --filter-contained     Exclude overlaps for internal matches 
   -t, --threads <INT>        Number of threads to use [default: 1]
   -C, --keep-temp            Don't clean up temporary files
@@ -315,6 +316,11 @@ Arguments:
           Control depth-aware read normalization
 
           [default: auto]
+
+      --shortfall <MODE>
+          How to split an input too small to supply both read sets [scale, target]
+
+          [default: scale]
 
   -F, --filter-contained
           Exclude overlaps for internal matches
@@ -453,6 +459,41 @@ We use this strategy as the default as it is the most computationally efficient 
 all-vs-all strategy. We suggest a smaller number of query reads than target reads, as this will speed things up and as 
 we take the median of the estimates, the number of query reads (over a certain point) should not affect the accuracy of 
 the estimate all that much.
+
+That asymmetry is why an input with fewer reads than the two sets ask for is divided between them in
+the requested ratio, both sets shrinking together. An input of 7,473 reads asked for 10,000 target
+and 5,000 query gives 4,982 and 2,491. Up to and including v0.3.0 the whole shortfall came out of
+the target set, giving 2,473 and 5,000, so a request for twice as many target as query reads was
+served with half as many. To see what that costs, a pool of about 7,500 reads from three accessions
+with known genome sizes was divided five ways on three seeds each, from the split the old rule
+produces through to eight target reads per query read. Taking the median of the three seeds, the old
+rule landed at 0.010x, 0.156x and 0.209x of the true size on the three accessions, and the requested
+2:1 at 0.081x, 0.268x and 0.247x. Those medians rise with the target's share at every step on all
+three accessions. Seven of the nine individual seed series do the same throughout; the two that do
+not each dip once and by little, 0.209x to 0.200x on SRR26715166 seed 42 and 0.385x to 0.361x on
+DRR213976 seed 4556. From 1:1 onward the reported interval also narrows against the estimate, on
+SRR12247681 from 90 times the estimate down to 1.9 times, so the higher estimates are the better
+determined ones as well; the one step it widens on is the first, out of the old rule's split.
+
+Splitting further toward the target than the request asked for helped further still, so the ratio
+the request asks for is a floor on what is available rather than the best split. Settling where the
+split should sit is a calibration question over the whole benchmark, which
+[issue #36](https://github.com/mbhall88/lrge/issues/36) owns, as is whether a floor on expected
+overlaps per query read is a better rule than a ratio at all. The runs behind this paragraph are in
+`paper/corrections/issue60_split_sweep.tsv`.
+
+Across the 17 benchmark accessions the change reaches only `SRR26715166`, the one input that cannot
+supply 15,000 reads. Its estimate moves from 0.828x to 0.912x of the true size under
+`--normalize auto`, and from 0.215x to 0.247x under `--normalize never`. Over 20 seeds the new rule
+is nearer the truth on 19 and 16 of them respectively. The other 16 accessions reproduce to the base
+pair. The estimate the paper reports for `SRR26715166` is therefore out of date, and #36's rerun is
+what will replace it.
+
+Pass `--shortfall target` to take the whole shortfall from the target set as before. Sizing the sets
+by number with `-T` and `-Q` is the more direct way to ask for a particular split, since the ratio
+is preserved whatever it is: a deliberately query-heavy request stays query-heavy. An input with
+fewer reads than the query request alone used to be an error, so LRGE refused to run on any input of
+5,000 reads or fewer at the defaults; it is now divided like any other.
 
 ### All-vs-all strategy
 

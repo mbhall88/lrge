@@ -40,6 +40,11 @@
 //! `overlaps.paf`.
 //!
 //! You can set your own temporary directory by using the [`Builder::tmpdir`] method.
+//!
+//! An input with fewer reads than the two sets ask for is divided between them in the requested
+//! ratio, so a request for twice as many target as query reads stays at twice as many. Use
+//! [`Builder::shortfall`] to take the whole shortfall from the target set instead, which is what
+//! this strategy did up to and including v0.3.0.
 mod builder;
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
@@ -59,8 +64,10 @@ pub use self::builder::Builder;
 use crate::estimate::per_read_estimate;
 use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
+use crate::read_selection::allocate_output_counts;
 use crate::{
     error::LrgeError, io, read_selection::ReadSelector, Estimate, Normalization, Platform,
+    Shortfall,
 };
 
 #[cfg(test)]
@@ -103,6 +110,8 @@ pub struct TwoSetStrategy {
     platform: Platform,
     /// Controls depth-aware read normalization.
     normalization: Normalization,
+    /// How an input too small to supply both read sets is divided between them.
+    shortfall: Shortfall,
     /// Cap on the bytes of selected reads normalization may buffer.
     max_read_buffer: u64,
 }
@@ -131,6 +140,7 @@ impl TwoSetStrategy {
         debug!("Counting records in input file...");
         let mut selector = ReadSelector::new(&self.input, self.seed, self.normalization)?
             .threads(self.threads)
+            .shortfall(self.shortfall)
             .max_read_buffer(self.max_read_buffer);
         if self.normalization == Normalization::Auto && !selector.depth_skew().skewed {
             debug!("{}", selector.depth_skew());
@@ -142,19 +152,30 @@ impl TwoSetStrategy {
 
         let n_req_reads = self.target_num_reads + self.query_num_reads;
 
-        if n_fq_reads <= self.query_num_reads {
-            let msg = format!(
-                "Number of reads in input file ({n_fq_reads}) is <= query number of reads ({})",
-                self.query_num_reads
-            );
-            return Err(LrgeError::TooFewReadsError(msg));
-        } else if n_fq_reads < n_req_reads {
+        if n_fq_reads < n_req_reads {
             warn!(
                 "Number of reads in input file ({}) is less than the sum of target and query reads ({})",
                 n_fq_reads, n_req_reads
             );
-            self.target_num_reads = n_fq_reads - self.query_num_reads;
-            warn!("Using {} target reads", self.target_num_reads);
+            let counts = allocate_output_counts(
+                vec![self.target_num_reads, self.query_num_reads],
+                n_fq_reads,
+                self.shortfall,
+            );
+            self.target_num_reads = counts[0];
+            self.query_num_reads = counts[1];
+            warn!(
+                "Using {} target reads and {} query reads",
+                self.target_num_reads, self.query_num_reads
+            );
+            // Being a few reads short is not worth alarming anyone over. Being half short is: at
+            // that point each query read has too few targets to overlap, and every input measured
+            // for issue #60 came out far below its true size.
+            if n_fq_reads * 2 < n_req_reads {
+                warn!(
+                    "That is less than half the reads requested, so most query reads will find few or no overlaps and the estimate will read low"
+                );
+            }
         }
 
         let target_file = self.tmpdir.join("target.fa");
