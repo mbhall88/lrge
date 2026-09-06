@@ -49,7 +49,7 @@ the eleven from 4 to 48 that are plausible choices:
 
 - `issue36_benchmark_sweep.tsv` — one row per accession per variant, 23,590 rows. The raw material.
 - `issue36_constant_grid.tsv` — the grid over all 3,370 runs.
-- `issue36_constant_grid_holdout.tsv` — the same grid, holding out every third accession as a test split.
+- `issue36_constant_grid_holdout.tsv` — the same grid, holding out every third accession.
 - `issue36_selection.tsv` — rescues against regressions, with two bootstraps over accessions:
   `boot_net_*` on the rescue-minus-regression count, and `mean_err_vs_shipped` with `boot_err_*`
   pairing each cell's mean |log2| error against the shipped pair.
@@ -57,6 +57,7 @@ the eleven from 4 to 48 that are plausible choices:
 - `issue36_timing_measured.tsv` — the stock binary timed in both modes, three replicates.
 - `issue36_failure_outcomes.tsv` — every run under half its true size, before or after.
 - `issue36_movers.tsv` — the 186 runs the detector fires on, classed by what happened to them.
+- `issue36_filter_contained.tsv` — 27 accessions with and without `-F`, crossed with normalization.
 
 ## What it says
 
@@ -117,6 +118,36 @@ Thirteen still fail, and depth normalization is not the mechanism for them. Nine
 of their reads through normalization, so there is almost nothing to remove, and raven sizes eight of
 those nine within 5% from the same reads. Two, `SRR13183064` and `SRR13183067`, are thin enough at a
 median depth of 2 that genomescope and raven miss them as badly.
+
+## The next mechanism, and a limit on this fit
+
+Nine of the thirteen keep more than 90% of their reads, so depth is not their problem. The
+estimator divides by the number of overlaps a query read finds, so an overlap that is not really an
+overlap drives the estimate down, and an internal match, two reads sharing a repeat rather than a
+locus, is exactly that. `-F` / `--filter-contained` drops them. That was tested on the 27
+accessions still on disk from the #29 work, in four arms: normalization on or off, crossed with
+`-F` on or off, stock binary throughout. The runs are in `issue36_filter_contained.tsv`.
+
+`-F` is the mechanism the residual failures need. Of the 12 residuals in this set, `-F` takes 11 out
+of the sub-0.5x band and 7 of them to within 10% of the truth: `SRR16631313` 0.121 to 0.901,
+`SRR30357568` 0.220 to 0.998, `SRR30162149` 0.347 to 0.872. Only `SRR13183064` stays under half, and
+it is one of the two that genomescope and raven also miss.
+
+It cannot simply be turned on, because it raises every estimate. The per-run effect ranges from
+1.08x to 7.46x and is never below 1, which is what removing overlaps from a denominator does. On the
+13 accessions here that normalization alone already put within 10% of the truth, `-F` pushes all 13
+above 1.1x, by 8 to 24 percent. So the filter is not miscalibrated in some runs and right in others:
+it shifts the whole scale, and the estimator's constants were derived without it. Making it the
+default is a recalibration, which is #38's subject, not a flag flip.
+
+This is also the limit on the fit above. The threshold and the multiplier were swept on the default
+path, without `-F`, because that is the invocation the published benchmark used. The plateau is a
+plateau for that path. If `-F` ever becomes the default, both constants have to be swept again.
+
+Two caveats on this table specifically. The 27 accessions are the outlier-enriched set collected for
+#29, not a sample of the benchmark, so the counts above describe them and not LRGE in general. And 8
+of the 27 hit the 1 Gbp cap, where the read set on disk is not quite the one the benchmark rebuilt,
+so their unnormalized values differ slightly from `issue36_benchmark_sweep.tsv`.
 
 ## What separates a rescue from a nuisance
 
