@@ -69,12 +69,13 @@ fn reads_sharing_a_repeat(repeat_reads: usize) -> NamedTempFile {
 
 /// Run with the filter off, or at a given share.
 ///
-/// A share of zero excludes whatever internal matches the run finds, which is what asking for the
-/// filter unconditionally amounts to and what these fixtures are built to trigger.
+/// The share is written with an equals sign because that is the only form `-F` takes. A share of
+/// zero excludes whatever internal matches the run finds, which is what asking for the filter
+/// unconditionally amounts to and what these fixtures are built to trigger.
 fn estimate(input: &NamedTempFile, share: Option<&str>, extra: &[&str]) -> (u64, String) {
     let mut arguments = ARGUMENTS.to_vec();
     if let Some(share) = share {
-        arguments.extend(["-F", "--internal-match-share", share]);
+        arguments.push(share);
     }
     arguments.extend_from_slice(extra);
     run(input, &arguments)
@@ -84,8 +85,8 @@ fn estimate(input: &NamedTempFile, share: Option<&str>, extra: &[&str]) -> (u64,
 fn an_input_whose_overlaps_are_repeats_filters_them_without_being_told_to() {
     let input = reads_sharing_a_repeat(REPEAT_READS);
     let (never, never_log) = estimate(&input, None, &[]);
-    let (always, _) = estimate(&input, Some("0"), &[]);
-    let (auto, auto_log) = estimate(&input, Some("0.8"), &[]);
+    let (always, _) = estimate(&input, Some("-F=0"), &[]);
+    let (auto, auto_log) = estimate(&input, Some("-F=0.8"), &[]);
 
     assert!(
         auto_log.contains("Repeat-driven overlaps detected"),
@@ -111,7 +112,7 @@ fn an_input_whose_overlaps_are_repeats_filters_them_without_being_told_to() {
 fn an_input_without_repeats_is_left_alone() {
     let input = reads_sharing_a_repeat(0);
     let (never, _) = estimate(&input, None, &[]);
-    let (auto, auto_log) = estimate(&input, Some("0.8"), &[]);
+    let (auto, auto_log) = estimate(&input, Some("-F=0.8"), &[]);
 
     assert!(
         auto_log.contains("Repeat-driven overlaps not detected"),
@@ -129,8 +130,8 @@ fn an_input_without_repeats_is_left_alone() {
 fn the_inverse_mapping_path_reaches_the_same_verdict() {
     let input = reads_sharing_a_repeat(REPEAT_READS);
     let (never, _) = estimate(&input, None, &["--use-min-ref"]);
-    let (always, _) = estimate(&input, Some("0"), &["--use-min-ref"]);
-    let (auto, auto_log) = estimate(&input, Some("0.8"), &["--use-min-ref"]);
+    let (always, _) = estimate(&input, Some("-F=0"), &["--use-min-ref"]);
+    let (auto, auto_log) = estimate(&input, Some("-F=0.8"), &["--use-min-ref"]);
 
     assert!(auto_log.contains("Repeat-driven overlaps detected"));
     assert_eq!(auto, always);
@@ -153,14 +154,14 @@ fn all_vs_all_reaches_the_same_verdict() {
     let with = |share: Option<&str>| {
         let mut arguments = arguments.to_vec();
         if let Some(share) = share {
-            arguments.extend(["-F", "--internal-match-share", share]);
+            arguments.push(share);
         }
         run(&input, &arguments)
     };
 
     let (never, _) = with(None);
-    let (always, _) = with(Some("0"));
-    let (auto, auto_log) = with(Some("0.8"));
+    let (always, _) = with(Some("-F=0"));
+    let (auto, auto_log) = with(Some("-F=0.8"));
 
     assert!(auto_log.contains("Repeat-driven overlaps detected"));
     assert_eq!(auto, always);
@@ -172,7 +173,7 @@ fn all_vs_all_reaches_the_same_verdict() {
 #[test]
 fn a_bare_filter_flag_uses_the_fitted_share() {
     let repeats = reads_sharing_a_repeat(REPEAT_READS);
-    let (at_default, _) = estimate(&repeats, Some("0.8"), &[]);
+    let (at_default, _) = estimate(&repeats, Some("-F=0.8"), &[]);
     let mut arguments = ARGUMENTS.to_vec();
     arguments.push("-F");
     let (bare, _) = run(&repeats, &arguments);
@@ -194,8 +195,8 @@ fn a_bare_filter_flag_uses_the_fitted_share() {
 fn the_share_the_caller_gives_is_the_one_that_decides() {
     let input = reads_sharing_a_repeat(REPEAT_READS);
     let (unfiltered, _) = estimate(&input, None, &[]);
-    let (low, low_log) = estimate(&input, Some("0.1"), &[]);
-    let (high, high_log) = estimate(&input, Some("0.99"), &[]);
+    let (low, low_log) = estimate(&input, Some("-F=0.1"), &[]);
+    let (high, high_log) = estimate(&input, Some("-F=0.99"), &[]);
 
     assert!(low_log.contains("Repeat-driven overlaps detected"));
     assert!(low_log.contains("against a threshold of 10.0%"));

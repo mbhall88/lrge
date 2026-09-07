@@ -176,9 +176,10 @@ come out of the one pass, so nothing is mapped twice.
 `-F` was first given three modes for this, `never`, `auto` and `always`. That did not survive
 contact with the benchmark below, which showed the threshold is a judgement rather than a constant.
 A mode called `auto` promises a decision the tool can make on the user's behalf, and this is not
-one. So `-F` stays the boolean it has always been, and the share it acts above is
-`--internal-match-share`, a separate option with a fitted default. `always` becomes
-`--internal-match-share 0`.
+one. So `-F` now carries the share it acts above, with the fitted one as its default: a bare `-F`
+filters above 0.8, `-F=0.5` above a half, and `-F=0` filters unconditionally, which is what the flag
+meant before. The share is written after an equals sign because clap would otherwise let a bare `-F`
+swallow the argument after it, which for this CLI is usually the input path.
 
 On the 27, that reproduced the prototype exactly: the filter engaged on the eight runs the probe
 said it would, took 19 of the 27 within 10% of the truth against 13 for never filtering and 9 for
@@ -240,9 +241,9 @@ Scoring every threshold against the same reads:
 
 No threshold beats not filtering on mean error. That is the finding, and it is why the filter stays
 off by default: a mechanism that raises the average error of a benchmark cannot be switched on for
-everybody, however many catastrophes it fixes. It is also why the threshold is a user-facing option
-rather than a constant. A table with no winning row is a judgement, and the reason `--internal-match-share`
-exists is so that the judgement can be someone else's.
+everybody, however many catastrophes it fixes. It is also why the share is a value the flag takes
+rather than a constant inside it. A table with no winning row is a judgement, and the reason `-F`
+takes a share is so that the judgement can be someone else's.
 
 The threshold moved to 0.8 because that is the first value that disturbs nothing already correct.
 The highest share among runs the estimator already puts within 10% of the truth is 0.796, on
