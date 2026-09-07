@@ -5,6 +5,7 @@ use std::path::PathBuf;
 const TARGET_NUM_READS: &str = "10000";
 const QUERY_NUM_READS: &str = "5000";
 const MAX_OVERHANG_RATIO: &str = "0.2";
+const INTERNAL_MATCH_THRESHOLD: &str = "0.8";
 const MAX_READ_BUFFER: &str = "1G";
 
 #[derive(Parser, Debug)]
@@ -42,14 +43,25 @@ pub struct Args {
     #[arg(long, value_name = "MODE", default_value = "scale")]
     pub shortfall: liblrge::Shortfall,
 
-    /// Exclude overlaps for internal matches [never, auto, always]
+    /// Exclude overlaps that are internal matches from repeat-driven runs
     ///
     /// An internal match is an alignment sitting in the middle of both reads with long unaligned
-    /// tails either side, which is what two reads sharing a repeat look like. `auto` measures how
-    /// much of the overlap evidence they account for and excludes them only when that share is high
-    /// enough to say the overlaps are driven by repeats. Given with no value, this is `always`.
-    #[arg(short = 'F', long = "filter-contained", value_name = "MODE", num_args = 0..=1, default_value = "never", default_missing_value = "always")]
-    pub filter_contained: liblrge::InternalFilter,
+    /// tails either side, which is what two reads sharing a repeat look like. Excluding them can
+    /// only raise an estimate, and on most inputs that is the wrong direction, so this is off
+    /// unless asked for. A run that is asked measures what share of its overlaps they account for
+    /// and excludes them only above --internal-match-share.
+    #[arg(short = 'F', long = "filter-contained")]
+    pub filter_contained: bool,
+
+    /// Share of a run's overlaps that internal matches must exceed before -F excludes them
+    ///
+    /// The default was fitted on the paper's benchmark as the highest share among runs LRGE already
+    /// sizes correctly, so that filtering disturbs none of them. It is a starting point rather than
+    /// a settled constant: lower it to catch more repeat-driven runs at the cost of some correct
+    /// ones, and give 0 to exclude every internal match whatever the share, which is what -F did
+    /// before it had a threshold.
+    #[arg(long = "internal-match-share", value_name = "FLOAT", default_value = INTERNAL_MATCH_THRESHOLD, value_parser = validate_internal_match_threshold, requires = "filter_contained", hide_short_help = true)]
+    pub internal_match_share: f64,
 
     /// Number of threads to use
     #[arg(short, long, value_name = "INT", default_value = "1")]
@@ -85,9 +97,9 @@ pub struct Args {
 
     /// Maximum overhang size to alignment length ratio for internal overlap filtering
     ///
-    /// This is what decides whether a mapping is an internal match, so it applies to `auto` as
-    /// well as `always`. Only meaningful alongside -F/--filter-contained, which this option
-    /// requires.
+    /// This decides whether a single mapping is an internal match, where --internal-match-share
+    /// decides how many of them a run has to have. Only meaningful alongside
+    /// -F/--filter-contained, which this option requires.
     #[arg(long = "max-overhang-ratio", value_name = "FLOAT", default_value = MAX_OVERHANG_RATIO, value_parser = validate_overhang_ratio, requires = "filter_contained", hide_short_help = true)]
     pub max_overhang_ratio: f32,
 
@@ -209,6 +221,24 @@ fn parse_size_suffix(suffix: &str) -> Option<u32> {
 }
 
 /// A value parser for the maximum overhang ratio
+/// The share of a run's overlaps that internal matches have to exceed before they are excluded.
+///
+/// A share is a fraction, so anything outside 0 to 1 is a mistake rather than a strong opinion. One
+/// is accepted and never fires, because a share cannot exceed it.
+fn validate_internal_match_threshold(s: &str) -> Result<f64, String> {
+    let value: f64 = s
+        .parse()
+        .map_err(|_| format!("`{s}` is not a valid number",))?;
+    if (0.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!(
+            "Value `{s}` must be between 0.0 and 1.0; it is the share of a run's overlaps that \
+             internal matches have to exceed",
+        ))
+    }
+}
+
 fn validate_overhang_ratio(s: &str) -> Result<f32, String> {
     let value: f32 = s
         .parse()
@@ -516,40 +546,73 @@ mod tests {
         let opts = Args::try_parse_from([BIN, "Cargo.toml", "-F", "--max-overhang-ratio", "0.05"])
             .unwrap();
 
-        assert_eq!(opts.filter_contained, liblrge::InternalFilter::Always);
+        assert!(opts.filter_contained);
         assert_eq!(opts.max_overhang_ratio, 0.05);
     }
 
     #[test]
-    fn cli_bare_filter_contained_still_means_filter_everything() {
-        // -F was a flag before it was a mode, and the runs that used it meant "always"
+    fn cli_bare_filter_contained_uses_the_fitted_share() {
         let opts = Args::try_parse_from([BIN, "Cargo.toml", "-F"]).unwrap();
 
-        assert_eq!(opts.filter_contained, liblrge::InternalFilter::Always);
+        assert!(opts.filter_contained);
+        assert_eq!(
+            opts.internal_match_share,
+            liblrge::DEFAULT_INTERNAL_MATCH_THRESHOLD
+        );
+    }
+
+    /// The flag has to sit next to a positional without swallowing it, which is what an option
+    /// taking a value would have done.
+    #[test]
+    fn cli_filter_contained_does_not_consume_the_input_path() {
+        let opts = Args::try_parse_from([BIN, "-F", "Cargo.toml"]).unwrap();
+
+        assert!(opts.filter_contained);
+        assert_eq!(opts.input, PathBuf::from("Cargo.toml"));
     }
 
     #[test]
-    fn cli_accepts_internal_filter_modes() {
-        for (mode, expected) in [
-            ("never", liblrge::InternalFilter::Never),
-            ("auto", liblrge::InternalFilter::Auto),
-            ("always", liblrge::InternalFilter::Always),
-        ] {
+    fn cli_internal_match_share_takes_a_share() {
+        for (given, expected) in [("0", 0.0), ("0.5", 0.5), ("1", 1.0)] {
             let opts =
-                Args::try_parse_from([BIN, "Cargo.toml", "--filter-contained", mode]).unwrap();
-            assert_eq!(opts.filter_contained, expected);
+                Args::try_parse_from([BIN, "Cargo.toml", "-F", "--internal-match-share", given])
+                    .unwrap();
+            assert_eq!(opts.internal_match_share, expected);
         }
     }
 
     #[test]
-    fn cli_rejects_an_invalid_internal_filter_mode() {
-        let error = Args::try_parse_from([BIN, "Cargo.toml", "-F", "sometimes"])
+    fn cli_internal_match_share_without_the_flag_is_an_error() {
+        let error = Args::try_parse_from([BIN, "Cargo.toml", "--internal-match-share", "0.5"])
             .unwrap_err()
             .to_string();
 
         assert!(
-            error.contains("expected auto, always, or never"),
-            "error should say what the modes are, got: {error}"
+            error.contains("--filter-contained"),
+            "error should name the flag that is missing, got: {error}"
+        );
+    }
+
+    #[test]
+    fn cli_rejects_a_share_outside_zero_to_one() {
+        for given in ["--internal-match-share=-0.1", "--internal-match-share=1.5"] {
+            let error = Args::try_parse_from([BIN, "Cargo.toml", "-F", given])
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("must be between 0.0 and 1.0"),
+                "share `{given}` should say what the range is, got: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn cli_default_internal_match_threshold_matches_the_library_default() {
+        // the CLI has to spell the default as a string for clap; keep it in step with the
+        // single definition in liblrge rather than letting the two drift
+        assert_eq!(
+            INTERNAL_MATCH_THRESHOLD.parse::<f64>().unwrap(),
+            liblrge::DEFAULT_INTERNAL_MATCH_THRESHOLD
         );
     }
 
@@ -568,7 +631,7 @@ mod tests {
         // the default value must not trip the requirement - a plain run has to keep working
         let opts = Args::try_parse_from([BIN, "Cargo.toml"]).unwrap();
 
-        assert_eq!(opts.filter_contained, liblrge::InternalFilter::Never);
+        assert!(!opts.filter_contained);
         assert_eq!(opts.max_overhang_ratio, MAX_OVERHANG_RATIO.parse().unwrap());
     }
 }

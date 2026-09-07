@@ -67,8 +67,8 @@ use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
 use crate::read_selection::allocate_output_counts;
 use crate::{
-    error::LrgeError, io, read_selection::ReadSelector, Estimate, InternalFilter, Normalization,
-    Platform, Shortfall,
+    error::LrgeError, io, read_selection::ReadSelector, Estimate, Normalization, Platform,
+    Shortfall,
 };
 
 #[cfg(test)]
@@ -95,8 +95,9 @@ pub struct TwoSetStrategy {
     query_num_reads: usize,
     /// The number of query bases to use in the strategy.
     query_num_bases: usize,
-    /// Controls whether overlaps that are internal matches are excluded.
-    internal_filter: InternalFilter,
+    /// The share of overlaps that has to be internal matches before they are excluded, or `None`
+    /// to keep them all.
+    internal_filter: Option<f64>,
     /// Maximum overhang ratio
     max_overhang_ratio: f32,
     /// Use the smaller Q/T dataset as minimap2 reference
@@ -290,11 +291,11 @@ impl TwoSetStrategy {
             })?;
 
         // Every query read yields two estimates: one from the overlaps that survive internal-match
-        // filtering, and one from all of them. They only differ under `auto`, which has yet to
-        // choose between them when the mapping pass starts, and the pass is the only place the
-        // second one can be had.
-        let deciding = self.internal_filter.is_deciding();
-        let filtering = self.internal_filter.evaluates_internal_matches();
+        // filtering, and one from all of them. Which the run wants is not known until the pass has
+        // measured its internal-match share, and the pass is the only place the second one can be
+        // had, so both are carried to the end of it. A run that never asked for the filter still
+        // measures, because the second count rides along with the first at no cost worth measuring
+        // and a share nobody can see is a threshold nobody can choose.
         let estimates: Vec<(f32, f32)> = Vec::with_capacity(self.query_num_reads);
         let estimates = Arc::new(Mutex::new(estimates));
         let no_mapping_count = AtomicU32::new(0);
@@ -333,18 +334,14 @@ impl TwoSetStrategy {
                                 // write the PafRecord to the PAF file
                                 writer_lock.serialize(mapping)?;
 
-                                if deciding {
-                                    unfiltered_overlaps.insert(mapping.target_name.clone());
-                                }
-                                if filtering && mapping.is_internal(self.max_overhang_ratio) {
+                                unfiltered_overlaps.insert(mapping.target_name.clone());
+                                if mapping.is_internal(self.max_overhang_ratio) {
                                     continue;
                                 }
                                 unique_overlaps.insert(mapping.target_name.clone());
                             }
                         }
-                        if deciding {
-                            tally.observe(unfiltered_overlaps.len(), unique_overlaps.len());
-                        }
+                        tally.observe(unfiltered_overlaps.len(), unique_overlaps.len());
                     } else {
                         trace!(
                             "No overlaps found for read: {}",
@@ -360,17 +357,13 @@ impl TwoSetStrategy {
                         unique_overlaps.len(),
                         overlap_threshold,
                     );
-                    let unfiltered_est = if deciding {
-                        per_read_estimate(
-                            seq.len(),
-                            avg_target_len,
-                            self.target_num_reads,
-                            unfiltered_overlaps.len(),
-                            overlap_threshold,
-                        )
-                    } else {
-                        est
-                    };
+                    let unfiltered_est = per_read_estimate(
+                        seq.len(),
+                        avg_target_len,
+                        self.target_num_reads,
+                        unfiltered_overlaps.len(),
+                        overlap_threshold,
+                    );
 
                     trace!(
                         "Estimate for {}: {}",
@@ -488,17 +481,15 @@ impl TwoSetStrategy {
                 LrgeError::ThreadError(format!("Error setting number of threads: {e}",))
             })?;
 
-        // The two counters differ only under `auto`, which decides which of them the estimates come
-        // from once the pass has measured how much of the overlap evidence is internal matches.
-        let deciding = self.internal_filter.is_deciding();
-        let filtering = self.internal_filter.evaluates_internal_matches();
+        // Both counters are filled on every run, and which of the two the estimates come from is
+        // decided once the pass has measured the run's internal-match share.
         let tally = InternalMatchTally::default();
         let mut read_lengths: HashMap<Vec<u8>, usize> =
             HashMap::with_capacity(self.query_num_reads);
         let mut ovlap_counter: HashMap<Vec<u8>, usize> =
             HashMap::with_capacity(self.query_num_reads);
         let mut unfiltered_counter: HashMap<Vec<u8>, usize> =
-            HashMap::with_capacity(if deciding { self.query_num_reads } else { 0 });
+            HashMap::with_capacity(self.query_num_reads);
 
         for i in 0..self.query_num_reads {
             unsafe {
@@ -519,9 +510,7 @@ impl TwoSetStrategy {
                         String::from_utf8_lossy(&qname).to_string(),
                     ));
                 }
-                if deciding {
-                    unfiltered_counter.insert(qname, 0);
-                }
+                unfiltered_counter.insert(qname, 0);
             }
         }
 
@@ -563,8 +552,7 @@ impl TwoSetStrategy {
                                 // write the PafRecord to the PAF file
                                 writer_lock.serialize(mapping)?;
 
-                                if deciding && unfiltered_unique.insert(mapping.target_name.clone())
-                                {
+                                if unfiltered_unique.insert(mapping.target_name.clone()) {
                                     *unfiltered_counter_lock
                                         .entry(mapping.target_name.clone())
                                         .or_insert(0) += 1;
@@ -574,7 +562,7 @@ impl TwoSetStrategy {
                                     continue;
                                 }
 
-                                if filtering && mapping.is_internal(self.max_overhang_ratio) {
+                                if mapping.is_internal(self.max_overhang_ratio) {
                                     continue;
                                 }
 
@@ -584,9 +572,7 @@ impl TwoSetStrategy {
                                 unique_overlaps.insert(mapping.target_name.clone());
                             }
 
-                            if deciding {
-                                tally.observe(unfiltered_unique.len(), unique_overlaps.len());
-                            }
+                            tally.observe(unfiltered_unique.len(), unique_overlaps.len());
                         }
                     }
 
@@ -606,13 +592,11 @@ impl TwoSetStrategy {
             started.elapsed()
         );
 
-        // Under any mode but `auto` the second counter was never filled, and the first already
-        // holds what the mode asked for.
         let filtered = filter_internal_matches(self.internal_filter, &tally);
-        let ovlap_counter = if deciding && !filtered {
-            unfiltered_counter
-        } else {
+        let ovlap_counter = if filtered {
             ovlap_counter
+        } else {
+            unfiltered_counter
         };
         let ovlap_counter = Arc::try_unwrap(ovlap_counter)
             .unwrap()

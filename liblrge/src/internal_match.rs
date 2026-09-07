@@ -12,45 +12,17 @@
 //! filter is off by default, and why turning it on unconditionally trades one failure mode for
 //! another.
 //!
-//! What this module adds is the third option. The same pass that collects overlaps can count what
+//! What this module adds is a middle setting. The same pass that collects overlaps can count what
 //! the filter would have discarded without discarding it, so a run can measure how much of its
-//! overlap evidence rests on repeats and decide for itself. See [`InternalMatchTally`].
+//! overlap evidence rests on repeats and act only when that share is high. The share it has to
+//! clear is the caller's to choose, because the benchmark says the best value depends on what the
+//! caller is willing to trade: see [`DEFAULT_INTERNAL_MATCH_THRESHOLD`][crate::DEFAULT_INTERNAL_MATCH_THRESHOLD].
+//! See [`InternalMatchTally`].
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use log::{debug, warn};
-
-use crate::InternalFilter;
-
-// How much of the overlap evidence has to be internal matches before a run filters them out.
-//
-// Fitted on the paper's whole benchmark, 3,370 accessions whose genome size is known, each run made
-// both unfiltered and filtered so every threshold could be scored against the same reads. An
-// earlier version of this constant was fitted on 27 outlier-enriched accessions and sat at 0.7. The
-// benchmark moved it, and more usefully, it explained why the smaller set was misleading.
-//
-// The share is not a marker of underestimation. It is a marker of repeats, and over the benchmark
-// the two point opposite ways: from the lowest decile of the share to the highest, the median
-// estimate climbs from 0.995x of the truth to 1.245x, and the runs landing within 10% fall from 319
-// in 337 to 82. Filtering a high-share run therefore usually makes an overestimate worse, which is
-// why this mode is not the default, and why the threshold sits where it does rather than where the
-// rescues are densest.
-//
-// What the benchmark asks of the threshold is that it disturb nothing that was already right. The
-// highest share among runs the estimator already puts within 10% of the truth is 0.796, so 0.8 is
-// the first value that touches none of them, and it is also where the count landing within 10%
-// peaks. It fires on 30 of the 3,370. Eight of those were reading low and six come back into the
-// band; the other 22 were already reading high and every one of them is pushed further out.
-//
-// That trade is worth having as a mode and not as a default. It takes the runs estimating under
-// half their true size from 13 to 6, which is the failure this exists for, and costs no run that
-// was correct. It still raises the mean |log2| error over the benchmark, from 0.2195 to 0.2286,
-// because of those 22.
-//
-// The runs are in `paper/corrections/issue36_filter_benchmark_summary.tsv` and the argument is in
-// `paper/corrections/README_issue36.md`.
-pub(crate) const INTERNAL_MATCH_THRESHOLD: f64 = 0.8;
 
 /// Counts what internal-match filtering would discard, on a run that has not decided to discard it.
 ///
@@ -79,20 +51,27 @@ impl InternalMatchTally {
         self.kept.fetch_add(kept as u64, Ordering::Relaxed);
     }
 
-    /// Read the verdict off the counts. Call this once the mapping pass is done.
-    pub(crate) fn report(&self) -> InternalMatchReport {
+    /// Read the verdict off the counts, against the share the run had to clear. Call this once the
+    /// mapping pass is done.
+    pub(crate) fn report(&self, threshold: Option<f64>) -> InternalMatchReport {
         InternalMatchReport {
             unfiltered: self.unfiltered.load(Ordering::Relaxed),
             kept: self.kept.load(Ordering::Relaxed),
+            threshold,
         }
     }
 }
 
-/// What an [`InternalMatchTally`] came to, and whether it asks for the filter.
+/// What an [`InternalMatchTally`] came to, and the share a run had to clear, if it asked to.
+///
+/// Every run measures, because the count rides along with the one the estimate needs and a share a
+/// run cannot see is a threshold nobody can choose. Only a run that asked for the filter has a
+/// threshold to be measured against, and only that run gets a verdict.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct InternalMatchReport {
     unfiltered: u64,
     kept: u64,
+    threshold: Option<f64>,
 }
 
 impl InternalMatchReport {
@@ -107,16 +86,34 @@ impl InternalMatchReport {
     }
 
     /// Whether enough of the overlaps are internal matches to filter them out.
+    ///
+    /// False for a run that did not ask, however repeat-driven it turns out to be.
     pub(crate) fn repeat_driven(&self) -> bool {
-        self.drop_fraction()
-            .is_some_and(|fraction| fraction > INTERNAL_MATCH_THRESHOLD)
+        match (self.drop_fraction(), self.threshold) {
+            (Some(fraction), Some(threshold)) => fraction > threshold,
+            _ => false,
+        }
     }
 }
 
 impl fmt::Display for InternalMatchReport {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.drop_fraction() {
-            Some(fraction) => {
+        let Some(fraction) = self.drop_fraction() else {
+            return write!(
+                formatter,
+                "Repeat-driven overlaps not assessed (no overlaps)"
+            );
+        };
+        let share = format!(
+            "internal matches account for {:.1}% of {} overlaps",
+            fraction * 100.0,
+            self.unfiltered
+        );
+        match self.threshold {
+            // A run that did not ask for the filter gets the measurement and no verdict, because
+            // the verdict would be against a threshold it never chose.
+            None => write!(formatter, "Overlap composition: {share}"),
+            Some(threshold) => {
                 let verdict = if self.repeat_driven() {
                     "Repeat-driven overlaps detected"
                 } else {
@@ -124,50 +121,52 @@ impl fmt::Display for InternalMatchReport {
                 };
                 write!(
                     formatter,
-                    "{verdict} (internal matches account for {:.1}% of {} overlaps)",
-                    fraction * 100.0,
-                    self.unfiltered
+                    "{verdict} ({share}, against a threshold of {:.1}%)",
+                    threshold * 100.0
                 )
             }
-            None => write!(
-                formatter,
-                "Repeat-driven overlaps not assessed (no overlaps)"
-            ),
         }
     }
 }
 
-/// Whether a run should exclude its internal matches, given what it was asked for and what the
-/// mapping pass measured.
+/// Whether a run should exclude its internal matches, given the share it was asked to clear and
+/// what the mapping pass measured.
 ///
-/// Only [`InternalFilter::Auto`] consults the tally, and only it says anything about the tally in
-/// the log. A run that was told what to do has nothing to report.
-pub(crate) fn filter_internal_matches(mode: InternalFilter, tally: &InternalMatchTally) -> bool {
-    match mode {
-        InternalFilter::Never => false,
-        InternalFilter::Always => true,
-        InternalFilter::Auto => {
-            let report = tally.report();
-            // Filtering moves the estimate on every input, so a run that engages it is a run whose
-            // answer would have been very different a moment ago. That is worth a warning.
-            if report.repeat_driven() {
-                warn!("{report}");
-            } else {
-                debug!("{report}");
-            }
-            report.repeat_driven()
-        }
+/// `None` is a run that never asked for the filter. It still reports what it measured, because a
+/// share nobody can see is a threshold nobody can choose, but it never acts on it. A threshold of
+/// zero filters whatever internal matches the run found, which is what asking for the filter
+/// unconditionally amounts to.
+pub(crate) fn filter_internal_matches(threshold: Option<f64>, tally: &InternalMatchTally) -> bool {
+    let report = tally.report(threshold);
+    // Filtering moves the estimate on every input, so a run that engages it is a run whose answer
+    // would have been very different a moment ago. That is worth a warning.
+    if report.repeat_driven() {
+        warn!("{report}");
+    } else {
+        debug!("{report}");
     }
+    report.repeat_driven()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_INTERNAL_MATCH_THRESHOLD as DEFAULT;
 
     fn report(unfiltered: u64, kept: u64) -> InternalMatchReport {
+        at(unfiltered, kept, DEFAULT)
+    }
+
+    fn at(unfiltered: u64, kept: u64, threshold: f64) -> InternalMatchReport {
         let tally = InternalMatchTally::default();
         tally.observe(unfiltered as usize, kept as usize);
-        tally.report()
+        tally.report(Some(threshold))
+    }
+
+    /// A share, expressed as the counts a run would have produced to reach it.
+    fn share(fraction: f64) -> InternalMatchReport {
+        let total = 1_000_000;
+        report(total, (total as f64 * (1.0 - fraction)).round() as u64)
     }
 
     #[test]
@@ -187,28 +186,23 @@ mod tests {
 
     #[test]
     fn the_threshold_is_exclusive_so_a_run_exactly_on_it_is_left_alone() {
-        let on_it = report(
-            1000,
-            (1000.0 * (1.0 - INTERNAL_MATCH_THRESHOLD)).round() as u64,
-        );
+        let on_it = share(DEFAULT);
 
-        assert_eq!(on_it.drop_fraction(), Some(INTERNAL_MATCH_THRESHOLD));
+        assert_eq!(on_it.drop_fraction(), Some(DEFAULT));
         assert!(!on_it.repeat_driven());
     }
 
-    /// What the benchmark asks of the threshold: leave alone every run the estimator already puts
+    /// What the benchmark asks of the default: leave alone every run the estimator already puts
     /// within 10% of the truth. The noisiest of those over 3,370 accessions is `SRR13170267`, at a
     /// share of 0.796, and filtering it would take it from 1.095x to 4.169x. See
-    /// [`INTERNAL_MATCH_THRESHOLD`].
+    /// [`DEFAULT_INTERNAL_MATCH_THRESHOLD`][crate::DEFAULT_INTERNAL_MATCH_THRESHOLD].
     #[test]
-    fn the_noisiest_already_correct_run_stays_below_the_threshold() {
-        let at = |fraction: f64| {
-            let total = 1_000_000;
-            report(total, (total as f64 * (1.0 - fraction)).round() as u64)
-        };
-
-        assert!(!at(0.796).repeat_driven(), "SRR13170267 is already correct");
-        assert!(at(0.845).repeat_driven(), "SRR30357565 needs the filter");
+    fn the_noisiest_already_correct_run_stays_below_the_default() {
+        assert!(
+            !share(0.796).repeat_driven(),
+            "SRR13170267 is already correct"
+        );
+        assert!(share(0.845).repeat_driven(), "SRR30357565 needs the filter");
     }
 
     #[test]
@@ -217,51 +211,77 @@ mod tests {
         tally.observe(10, 1);
         tally.observe(30, 9);
 
-        assert_eq!(tally.report().drop_fraction(), Some(0.75));
+        assert_eq!(tally.report(Some(DEFAULT)).drop_fraction(), Some(0.75));
     }
 
     #[test]
-    fn a_told_run_ignores_the_tally() {
+    fn a_run_that_never_asked_does_not_filter() {
         let repeat_driven = InternalMatchTally::default();
         repeat_driven.observe(100, 1);
 
-        assert!(!filter_internal_matches(
-            InternalFilter::Never,
-            &repeat_driven
-        ));
-        assert!(filter_internal_matches(
-            InternalFilter::Always,
-            &InternalMatchTally::default()
-        ));
+        assert!(!filter_internal_matches(None, &repeat_driven));
+    }
+
+    /// A run that never asked still measures, and says what it found without passing judgement on
+    /// it. That is what lets someone choose a threshold from one ordinary run.
+    #[test]
+    fn a_run_that_never_asked_reports_the_share_without_a_verdict() {
+        let tally = InternalMatchTally::default();
+        tally.observe(100, 10);
+        let line = tally.report(None).to_string();
+
+        assert!(
+            line.contains("account for 90.0% of 100 overlaps"),
+            "got: {line}"
+        );
+        assert!(
+            !line.contains("detected"),
+            "a run that did not ask gets no verdict: {line}"
+        );
+        assert!(!line.contains("threshold"), "got: {line}");
+    }
+
+    /// Asking for the filter unconditionally is a threshold of zero, which is what the flag meant
+    /// before it took a share.
+    #[test]
+    fn a_threshold_of_zero_filters_whatever_the_run_found() {
+        let barely = InternalMatchTally::default();
+        barely.observe(1_000_000, 999_999);
+
+        assert!(filter_internal_matches(Some(0.0), &barely));
+    }
+
+    /// A run with no internal matches at all has none to remove, so even a threshold of zero
+    /// leaves its estimate alone. The two are the same answer by different routes.
+    #[test]
+    fn a_run_with_nothing_to_filter_is_not_filtered_at_any_threshold() {
+        let clean = InternalMatchTally::default();
+        clean.observe(1_000, 1_000);
+
+        assert!(!filter_internal_matches(Some(0.0), &clean));
     }
 
     #[test]
-    fn an_auto_run_follows_the_tally() {
-        let repeat_driven = InternalMatchTally::default();
-        repeat_driven.observe(100, 1);
-        let ordinary = InternalMatchTally::default();
-        ordinary.observe(100, 99);
+    fn the_threshold_the_caller_gives_is_the_one_that_decides() {
+        let two_thirds = InternalMatchTally::default();
+        two_thirds.observe(300, 100);
 
-        assert!(filter_internal_matches(
-            InternalFilter::Auto,
-            &repeat_driven
-        ));
-        assert!(!filter_internal_matches(InternalFilter::Auto, &ordinary));
+        assert!(filter_internal_matches(Some(0.5), &two_thirds));
+        assert!(!filter_internal_matches(Some(0.9), &two_thirds));
     }
 
-    /// A run with no overlaps at all has nothing to correct, and the correction it would make is
-    /// the one that cannot be undone: filtering can only take overlaps away.
     #[test]
     fn an_auto_run_that_saw_nothing_does_not_filter() {
         assert!(!filter_internal_matches(
-            InternalFilter::Auto,
+            Some(DEFAULT),
             &InternalMatchTally::default()
         ));
     }
 
     #[test]
-    fn the_verdict_names_itself_either_way() {
+    fn the_verdict_names_itself_either_way_and_says_what_it_measured_against() {
         assert!(report(100, 10).to_string().contains("detected (internal"));
         assert!(report(100, 90).to_string().contains("not detected"));
+        assert!(at(100, 10, 0.5).to_string().contains("threshold of 50.0%"));
     }
 }

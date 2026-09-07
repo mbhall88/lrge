@@ -1,4 +1,4 @@
-use crate::{InternalFilter, Normalization, Platform, Shortfall};
+use crate::{Normalization, Platform, Shortfall};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ pub struct Builder {
     target_num_bases: usize,
     query_num_reads: usize,
     query_num_bases: usize,
-    internal_filter: InternalFilter,
+    internal_filter: Option<f64>,
     max_overhang_ratio: f32,
     use_min_ref: bool,
     tmpdir: PathBuf,
@@ -31,7 +31,7 @@ impl Default for Builder {
             target_num_bases: 0,
             query_num_reads: DEFAULT_QUERY_NUM_READS,
             query_num_bases: 0,
-            internal_filter: InternalFilter::default(),
+            internal_filter: None,
             max_overhang_ratio: DEFAULT_MAX_OVERHANG_RATIO,
             use_min_ref: false,
             tmpdir,
@@ -93,13 +93,18 @@ impl Builder {
         self
     }
 
-    /// Set how overlaps representing internal matches are handled, and the maximum ratio of
-    /// overhang to alignment length above which a mapping counts as one.
+    /// Set the share of a run's overlaps that has to be internal matches before they are excluded,
+    /// and the maximum ratio of overhang to alignment length above which a mapping counts as one.
     ///
-    /// The ratio is stored whatever the mode, so it survives being set before the filter is
-    /// turned on.
-    pub fn internal_filter(mut self, mode: InternalFilter, ratio: f32) -> Self {
-        self.internal_filter = mode;
+    /// `None` keeps every overlap, which is the default. `Some(0.0)` excludes whatever internal
+    /// matches the run finds. In between, the run measures its own share during the overlap pass
+    /// and excludes them only if it clears the threshold; see
+    /// [`DEFAULT_INTERNAL_MATCH_THRESHOLD`][crate::DEFAULT_INTERNAL_MATCH_THRESHOLD] for what the
+    /// benchmark says about choosing one.
+    ///
+    /// The ratio is stored either way, so it survives being set before the filter is turned on.
+    pub fn internal_filter(mut self, threshold: Option<f64>, ratio: f32) -> Self {
+        self.internal_filter = threshold;
         self.max_overhang_ratio = ratio;
         self
     }
@@ -240,29 +245,31 @@ impl Builder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_INTERNAL_MATCH_THRESHOLD;
 
     #[test]
     fn internal_filter_keeps_the_ratio_when_the_filter_is_off() {
         // the ratio is an independent setting - storing it only when the filter is enabled
         // silently discards a caller's choice
-        let strategy = Builder::new()
-            .internal_filter(InternalFilter::Never, 0.05)
-            .build("reads.fq");
+        let strategy = Builder::new().internal_filter(None, 0.05).build("reads.fq");
 
-        assert_eq!(strategy.internal_filter, InternalFilter::Never);
+        assert_eq!(strategy.internal_filter, None);
         assert_eq!(strategy.max_overhang_ratio, 0.05);
     }
 
     #[test]
-    fn internal_filter_keeps_the_ratio_in_every_mode() {
-        for mode in [
-            InternalFilter::Never,
-            InternalFilter::Auto,
-            InternalFilter::Always,
+    fn internal_filter_keeps_the_ratio_at_every_threshold() {
+        for threshold in [
+            None,
+            Some(0.0),
+            Some(0.5),
+            Some(DEFAULT_INTERNAL_MATCH_THRESHOLD),
         ] {
-            let strategy = Builder::new().internal_filter(mode, 0.05).build("reads.fq");
+            let strategy = Builder::new()
+                .internal_filter(threshold, 0.05)
+                .build("reads.fq");
 
-            assert_eq!(strategy.internal_filter, mode);
+            assert_eq!(strategy.internal_filter, threshold);
             assert_eq!(strategy.max_overhang_ratio, 0.05);
         }
     }
@@ -271,7 +278,7 @@ mod tests {
     fn internal_filter_defaults_to_off_with_the_default_ratio() {
         let strategy = Builder::new().build("reads.fq");
 
-        assert_eq!(strategy.internal_filter, InternalFilter::Never);
+        assert_eq!(strategy.internal_filter, None);
         assert_eq!(strategy.max_overhang_ratio, DEFAULT_MAX_OVERHANG_RATIO);
     }
 }

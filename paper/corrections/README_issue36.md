@@ -168,27 +168,33 @@ benchmark later moved it, for reasons this set could not have shown: see
 
 ## Switching the filter on from that measurement
 
-The rule was then implemented rather than left as a prototype. `-F` takes a mode, as `--normalize`
-does: `never` (the default, and what LRGE did before), `always` (what bare `-F` has always meant),
-and `auto`. Under `auto` the mapping pass carries two overlap counts per query read, one with the
-internal matches and one without, and picks between them once it has seen how much of the evidence
-they account for. Both counts come out of the one pass, so nothing is mapped twice.
+The rule was then implemented rather than left as a prototype. The mapping pass carries two overlap
+counts per query read, one with the internal matches and one without, and a run that asked for the
+filter picks between them once it has seen how much of its evidence they account for. Both counts
+come out of the one pass, so nothing is mapped twice.
 
-On the 27, that reproduced the prototype exactly: `auto` engaged on the eight runs the probe said it
-would, took 19 of the 27 within 10% of the truth against 13 for never filtering and 9 for always,
-and disturbed none of the thirteen already inside the band. `never` and `always` reproduced the
-stock binary's estimate to the base pair on all 27, which is the check that mattered, because the
-counting loops had been rewritten to carry both counts. Those runs are in
+`-F` was first given three modes for this, `never`, `auto` and `always`. That did not survive
+contact with the benchmark below, which showed the threshold is a judgement rather than a constant.
+A mode called `auto` promises a decision the tool can make on the user's behalf, and this is not
+one. So `-F` stays the boolean it has always been, and the share it acts above is
+`--internal-match-share`, a separate option with a fitted default. `always` becomes
+`--internal-match-share 0`.
+
+On the 27, that reproduced the prototype exactly: the filter engaged on the eight runs the probe
+said it would, took 19 of the 27 within 10% of the truth against 13 for never filtering and 9 for
+always, and disturbed none of the thirteen already inside the band. Filtering never and filtering
+always reproduced the stock binary's estimate to the base pair on all 27, which is the check that
+mattered, because the counting loops had been rewritten to carry both counts. Those runs are in
 `issue36_dynamic_filter.tsv`.
 
 ## What the whole benchmark said about that rule
 
 The 27 were the wrong 27, and the benchmark says so. All 3,370 accessions were rebuilt and run in
 five arms: the last release, this branch with both mechanisms off, `--normalize auto`, and that plus
-`-F auto` and `-F always`. The per-accession rows are in
+the filter measured but not applied, and the filter always applied. The per-accession rows are in
 `issue36_filter_benchmark_summary.tsv`.
 
-`auto` does not fire too often. At the prototype's threshold it fired on 57 of 3,370, and at the
+The filter does not fire too often. At the prototype's threshold it fired on 57 of 3,370, and at the
 threshold it now carries, on 30. The problem is which 30.
 
 | where the run started | fires at 0.7 | fires at 0.8 |
@@ -232,9 +238,11 @@ Scoring every threshold against the same reads:
 | 0.85 | 17 | 2008 | 9 | 0.2264 | 0 | 2 |
 | 0.90 | 12 | 2008 | 9 | 0.2237 | 0 | 2 |
 
-No threshold beats not filtering on mean error. That is the finding, and it is why `never` stays the
-default: a mechanism that raises the average error of a benchmark cannot be switched on for
-everybody, however many catastrophes it fixes.
+No threshold beats not filtering on mean error. That is the finding, and it is why the filter stays
+off by default: a mechanism that raises the average error of a benchmark cannot be switched on for
+everybody, however many catastrophes it fixes. It is also why the threshold is a user-facing option
+rather than a constant. A table with no winning row is a judgement, and the reason `--internal-match-share`
+exists is so that the judgement can be someone else's.
 
 The threshold moved to 0.8 because that is the first value that disturbs nothing already correct.
 The highest share among runs the estimator already puts within 10% of the truth is 0.796, on
@@ -242,11 +250,16 @@ The highest share among runs the estimator already puts within 10% of the truth 
 within 10% also peaks. Below it the rule starts trading correct runs for rescues, which is a trade
 an opt-in mode should not be making on the user's behalf.
 
-What `auto` is for, then, is the failure it was found in: a genome you have reason to think is
+What `-F` is for, then, is the failure it was found in: a genome you have reason to think is
 repeat-rich, estimating far too low. It takes the runs under half their true size from 13 to 6 and
 costs no run that was right. On the 27 outlier accessions the higher threshold gives 18 within 10%
 and 5 under half, against 19 and 4 at 0.7; the two runs that trade places are the price of not
 disturbing four correct benchmark runs.
+
+Choosing a threshold needs the share, so every run measures it and reports it under `-vv` whether or
+not the filter was asked for. The second count rides along with the one the estimate needs, and the
+benchmark says that costs nothing: a run carrying both counts has a median wall clock and peak memory
+of 1.00x of one carrying a single count.
 
 ## What the modes cost
 
@@ -255,16 +268,17 @@ Five arms on the same reads, per-run ratios rather than ratios of medians, in
 
 | | median | p90 | p99 | max | faster than 0.3.0 |
 |---|---|---|---|---|---|
-| this branch, both modes off | 1.00x | 1.03x | 1.36x | 3.62x | 1778 / 3370 |
+| this branch, `--normalize never` | 1.00x | 1.03x | 1.36x | 3.62x | 1778 / 3370 |
 | `--normalize auto` | 1.02x | 1.10x | 1.60x | 3.01x | 911 / 3370 |
-| `--normalize auto -F auto` | 1.02x | 1.10x | 1.61x | 2.71x | 949 / 3370 |
-| `--normalize auto -F always` | 1.01x | 1.10x | 1.61x | 2.65x | 996 / 3370 |
+| `--normalize auto`, filter measured | 1.02x | 1.10x | 1.61x | 2.71x | 949 / 3370 |
+| `--normalize auto`, filter always applied | 1.01x | 1.10x | 1.61x | 2.65x | 996 / 3370 |
 
-Three things come out of that. Everything added since the release costs nothing when the modes are
-off, at a median of 0.998x. `-F auto` costs nothing on top of `--normalize auto`, at a median of
-1.000x wall clock and 1.000x peak memory, because the second overlap count rides along with the
-first. And normalizing shortens the tail rather than lengthening it: the slowest benchmark run takes
-943 seconds unnormalized and 452 normalized, and the p99 falls from 190 to 163 seconds.
+Three things come out of that. Everything added since the release costs nothing with normalization
+off, at a median of 0.998x. Carrying the second overlap count costs nothing on top of
+`--normalize auto`, at a median of 1.000x wall clock and 1.000x peak memory, which is what allows
+every run to measure its share whether or not it filters. And normalizing shortens the tail rather
+than lengthening it: the slowest benchmark run takes 943 seconds unnormalized and 452 normalized,
+and the p99 falls from 190 to 163 seconds.
 
 Cut by the condition each run was in, against the same binary with the mode off:
 
@@ -272,7 +286,7 @@ Cut by the condition each run was in, against the same binary with the mode off:
 |---|---|---|---|---|
 | detector does not fire | 3184 | 1.02x | 1.02x | 671 |
 | detector fires | 186 | 1.09x | 1.06x | 74 |
-| filter fires | 30 | 1.00x | 1.00x | 20 |
+| filter applied where it fires | 30 | 1.00x | 1.00x | 20 |
 
 This corrects something the README claimed from a seven-accession sample: that a run the detector
 fires on is usually quicker. Over 186 such runs the median is 1.09x and only 74 come out faster. The
@@ -282,7 +296,7 @@ on how many reads it removes.
 ### A limit this puts on the fit above
 
 The threshold and the multiplier were swept on the default path, without `-F`, because that is the
-invocation the published benchmark used. The plateau is a plateau for that path. If `-F auto` ever
+invocation the published benchmark used. The plateau is a plateau for that path. If `-F` ever
 becomes the default, both constants have to be swept again.
 
 ## What separates a rescue from a nuisance
@@ -340,9 +354,9 @@ shipped binary.
 
 The five-arm benchmark is a second harness, `/scratch/user/uqmhal11/lrge-filter`, with the same
 download rule and `workflow/analyse.py` over the result. Its `v030` arm is built from the
-`lrge-0.3.0` tag. Only four of its five arms are measured: `auto` is derived from the unfiltered and
-filtered arms and the share, which is exact because a run under `auto` takes one estimate or the
-other, and was checked against a measured `-F auto` arm on all 3,370 accessions. That is what lets
-the threshold move without the benchmark being rebuilt.
+`lrge-0.3.0` tag. The scored filter arm is derived rather than measured, from the unfiltered arm,
+the always-filtered arm and the share. That is exact, because a filtering run takes one of those two
+estimates and nothing else, and it was checked against a measured thresholded arm on all 3,370
+accessions. Deriving it is what lets the threshold move without the benchmark being rebuilt.
 
 [#36]: https://github.com/mbhall88/lrge/issues/36

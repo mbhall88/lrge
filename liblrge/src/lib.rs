@@ -140,6 +140,40 @@ pub mod twoset;
 /// treated as an internal match. Shared by both strategies.
 pub const DEFAULT_MAX_OVERHANG_RATIO: f32 = 0.2;
 
+/// How much of the overlap evidence has to be internal matches before a run filters them out.
+///
+/// This is a starting point, not a settled constant, which is why it is a default a caller can
+/// replace rather than a threshold baked into the estimator. What follows is what it was fitted on,
+/// so that anyone choosing a different one knows what they are trading.
+///
+/// Fitted on the paper's whole benchmark, 3,370 accessions whose genome size is known, each run made
+/// both unfiltered and filtered so every threshold could be scored against the same reads. An
+/// earlier version of this constant was fitted on 27 outlier-enriched accessions and sat at 0.7. The
+/// benchmark moved it, and more usefully, it explained why the smaller set was misleading.
+///
+/// The share is not a marker of underestimation. It is a marker of repeats, and over the benchmark
+/// the two point opposite ways: from the lowest decile of the share to the highest, the median
+/// estimate climbs from 0.995x of the truth to 1.245x, and the runs landing within 10% fall from 319
+/// in 337 to 82. Filtering a high-share run therefore usually makes an overestimate worse, which is
+/// why filtering is off unless asked for, and why this sits where it does rather than where the
+/// rescues are densest.
+///
+/// What the benchmark asks of the threshold is that it disturb nothing that was already right. The
+/// highest share among runs the estimator already puts within 10% of the truth is 0.796, so 0.8 is
+/// the first value that touches none of them, and it is also where the count landing within 10%
+/// peaks. It fires on 30 of the 3,370. Eight of those were reading low and six come back into the
+/// band; the other 22 were already reading high and every one of them is pushed further out.
+///
+/// That trade is worth offering and not worth imposing. It takes the runs estimating under half
+/// their true size from 13 to 6, which is the failure filtering exists for, and costs no run that
+/// was correct. It still raises the mean |log2| error over the benchmark, from 0.2195 to 0.2286,
+/// because of those 22. Lowering this rescues a little more and costs correct runs; raising it
+/// does the reverse.
+///
+/// The runs are in `paper/corrections/issue36_filter_benchmark_summary.tsv` and the argument is in
+/// `paper/corrections/README_issue36.md`.
+pub const DEFAULT_INTERNAL_MATCH_THRESHOLD: f64 = 0.8;
+
 /// The default cap on the bytes of selected reads that depth normalization holds in memory.
 ///
 /// Normalization buffers the reads it selects so it can write them once sampling is done. A
@@ -190,63 +224,6 @@ impl FromStr for Normalization {
             "never" => Ok(Self::Never),
             _ => Err(format!(
                 "invalid normalization mode '{value}'; expected auto, always, or never"
-            )),
-        }
-    }
-}
-
-/// Controls whether overlaps that are internal matches are excluded from the estimate.
-///
-/// An internal match is an alignment that sits in the middle of both reads with long unaligned
-/// tails on either end, which is what two reads sharing a repeat look like and not what two reads
-/// from the same locus look like. Excluding them is the right correction for an input whose
-/// overlaps are dominated by repeats, and the wrong one everywhere else: it can only remove
-/// overlaps, and a per-read estimate divides by the overlap count, so it can only push the
-/// estimate up.
-///
-/// [`Auto`][Self::Auto] tells those two cases apart by measuring, during the one mapping pass,
-/// how much of the overlap evidence the filter would have taken away.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum InternalFilter {
-    /// Keep every overlap. This is what LRGE has always done unless asked otherwise.
-    #[default]
-    Never,
-    /// Measure how much of the overlap evidence is internal matches, and exclude them only when
-    /// that share is high enough to say the overlaps are driven by repeats.
-    ///
-    /// Both counts come out of the one mapping pass, so this costs a second set of overlap
-    /// identities per query read and nothing else.
-    Auto,
-    /// Exclude every internal match, whatever the input looks like.
-    Always,
-}
-
-impl InternalFilter {
-    /// Whether the run has yet to choose, and so has to carry both overlap counts through the
-    /// mapping pass to have the one it does not pick.
-    pub(crate) fn is_deciding(self) -> bool {
-        self == Self::Auto
-    }
-
-    /// Whether the mapping pass has to test each overlap for being an internal match at all.
-    ///
-    /// True in every mode but [`Never`][Self::Never]: [`Auto`][Self::Auto] needs the test to
-    /// measure with, even before it knows whether it will act on it.
-    pub(crate) fn evaluates_internal_matches(self) -> bool {
-        self != Self::Never
-    }
-}
-
-impl FromStr for InternalFilter {
-    type Err = String;
-
-    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        match value.to_ascii_lowercase().as_str() {
-            "auto" => Ok(Self::Auto),
-            "always" => Ok(Self::Always),
-            "never" => Ok(Self::Never),
-            _ => Err(format!(
-                "invalid internal-match filter mode '{value}'; expected auto, always, or never"
             )),
         }
     }

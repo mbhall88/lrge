@@ -57,7 +57,7 @@ use crate::estimate::per_read_estimate;
 use crate::internal_match::{filter_internal_matches, InternalMatchTally};
 use crate::io::FastqRecordExt;
 use crate::minimap2::{AlignerWrapper, Preset};
-use crate::{io, read_selection::ReadSelector, Estimate, InternalFilter, Normalization, Platform};
+use crate::{io, read_selection::ReadSelector, Estimate, Normalization, Platform};
 
 /// The default number of reads to use in the all-vs-all strategy.
 pub const DEFAULT_AVA_NUM_READS: usize = 25_000;
@@ -76,8 +76,9 @@ pub struct AvaStrategy {
     num_reads: usize,
     /// The number of bases to use in the strategy.
     num_bases: usize,
-    /// Controls whether overlaps that are internal matches are excluded.
-    internal_filter: InternalFilter,
+    /// The share of overlaps that has to be internal matches before they are excluded, or `None`
+    /// to keep them all.
+    internal_filter: Option<f64>,
     /// Maximum overhang ratio
     max_overhang_ratio: f32,
     /// The directory to which all intermediate files will be written.
@@ -238,21 +239,20 @@ impl AvaStrategy {
                 LrgeError::ThreadError(format!("Error setting number of threads: {e}",))
             })?;
 
-        // The second counter and its pair set are only filled under `auto`, which decides which of
-        // the two the estimates come from once the pass has measured how much of the overlap
-        // evidence is internal matches.
-        let deciding = self.internal_filter.is_deciding();
-        let filtering = self.internal_filter.evaluates_internal_matches();
+        // Both counters and both pair sets are filled on every run, and which of the two the
+        // estimates come from is decided once the pass has measured the run's internal-match share.
+        // A run that never asked for the filter still measures, because the second count rides
+        // along with the first at no cost worth measuring and a share nobody can see is a threshold
+        // nobody can choose.
         let tally = InternalMatchTally::default();
         let ovlap_counter: HashMap<Vec<u8>, usize> = HashMap::with_capacity(self.num_reads);
         let ovlap_counter = Arc::new(Mutex::new(ovlap_counter));
-        let unfiltered_counter: HashMap<Vec<u8>, usize> =
-            HashMap::with_capacity(if deciding { self.num_reads } else { 0 });
+        let unfiltered_counter: HashMap<Vec<u8>, usize> = HashMap::with_capacity(self.num_reads);
         let unfiltered_counter = Arc::new(Mutex::new(unfiltered_counter));
         let seen_pairs: HashSet<(Vec<u8>, Vec<u8>)> = HashSet::with_capacity(self.num_reads);
         let seen_pairs = Arc::new(Mutex::new(seen_pairs));
         let unfiltered_seen_pairs: HashSet<(Vec<u8>, Vec<u8>)> =
-            HashSet::with_capacity(if deciding { self.num_reads } else { 0 });
+            HashSet::with_capacity(self.num_reads);
         let unfiltered_seen_pairs = Arc::new(Mutex::new(unfiltered_seen_pairs));
 
         debug!("Aligning reads and writing overlaps to PAF file...");
@@ -298,9 +298,7 @@ impl AvaStrategy {
                                 if &rid == tname {
                                     // Skip self-overlaps. if the qname is not in the ovlap_counter, we insert it with 0 overlaps
                                     ovlap_counter_lock.entry(rid.clone()).or_insert(0);
-                                    if deciding {
-                                        unfiltered_counter_lock.entry(rid.clone()).or_insert(0);
-                                    }
+                                    unfiltered_counter_lock.entry(rid.clone()).or_insert(0);
                                     continue;
                                 }
 
@@ -310,12 +308,12 @@ impl AvaStrategy {
                                     (tname.clone(), rid.clone())
                                 };
 
-                                if deciding && unfiltered_seen_pairs_lock.insert(pair.clone()) {
+                                if unfiltered_seen_pairs_lock.insert(pair.clone()) {
                                     *unfiltered_counter_lock.entry(tname.clone()).or_insert(0) += 1;
                                     *unfiltered_counter_lock.entry(rid.clone()).or_insert(0) += 1;
                                 }
 
-                                if filtering && mapping.is_internal(self.max_overhang_ratio) {
+                                if mapping.is_internal(self.max_overhang_ratio) {
                                     continue;
                                 }
 
@@ -331,9 +329,7 @@ impl AvaStrategy {
                         }
                         // if the qname is not in the ovlap_counter, we insert it with 0 overlaps
                         ovlap_counter_lock.entry(rid.clone()).or_insert(0);
-                        if deciding {
-                            unfiltered_counter_lock.entry(rid.clone()).or_insert(0);
-                        }
+                        unfiltered_counter_lock.entry(rid.clone()).or_insert(0);
                     }
 
                     Ok(())
@@ -357,20 +353,16 @@ impl AvaStrategy {
         // mapping is an internal match is counted unfiltered there and kept only when the reverse
         // mapping comes round. So the tally is taken once, off the two pair sets, rather than read
         // by read as the other two mapping loops take it.
-        if deciding {
-            tally.observe(
-                unfiltered_seen_pairs.lock().unwrap().len(),
-                seen_pairs.lock().unwrap().len(),
-            );
-        }
+        tally.observe(
+            unfiltered_seen_pairs.lock().unwrap().len(),
+            seen_pairs.lock().unwrap().len(),
+        );
 
-        // Under any mode but `auto` the second counter was never filled, and the first already
-        // holds what the mode asked for.
         let filtered = filter_internal_matches(self.internal_filter, &tally);
-        let ovlap_counter = if deciding && !filtered {
-            unfiltered_counter
-        } else {
+        let ovlap_counter = if filtered {
             ovlap_counter
+        } else {
+            unfiltered_counter
         };
         let ovlap_counter = Arc::try_unwrap(ovlap_counter)
             .unwrap()

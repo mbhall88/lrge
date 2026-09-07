@@ -67,9 +67,15 @@ fn reads_sharing_a_repeat(repeat_reads: usize) -> NamedTempFile {
     input
 }
 
-fn estimate(input: &NamedTempFile, mode: &str, extra: &[&str]) -> (u64, String) {
+/// Run with the filter off, or at a given share.
+///
+/// A share of zero excludes whatever internal matches the run finds, which is what asking for the
+/// filter unconditionally amounts to and what these fixtures are built to trigger.
+fn estimate(input: &NamedTempFile, share: Option<&str>, extra: &[&str]) -> (u64, String) {
     let mut arguments = ARGUMENTS.to_vec();
-    arguments.extend(["--filter-contained", mode]);
+    if let Some(share) = share {
+        arguments.extend(["-F", "--internal-match-share", share]);
+    }
     arguments.extend_from_slice(extra);
     run(input, &arguments)
 }
@@ -77,9 +83,9 @@ fn estimate(input: &NamedTempFile, mode: &str, extra: &[&str]) -> (u64, String) 
 #[test]
 fn an_input_whose_overlaps_are_repeats_filters_them_without_being_told_to() {
     let input = reads_sharing_a_repeat(REPEAT_READS);
-    let (never, never_log) = estimate(&input, "never", &[]);
-    let (always, _) = estimate(&input, "always", &[]);
-    let (auto, auto_log) = estimate(&input, "auto", &[]);
+    let (never, never_log) = estimate(&input, None, &[]);
+    let (always, _) = estimate(&input, Some("0"), &[]);
+    let (auto, auto_log) = estimate(&input, Some("0.8"), &[]);
 
     assert!(
         auto_log.contains("Repeat-driven overlaps detected"),
@@ -96,14 +102,16 @@ fn an_input_whose_overlaps_are_repeats_filters_them_without_being_told_to() {
         never < auto,
         "keeping the internal matches ({never}) should read lower than dropping them ({auto})"
     );
+    // a run that never asked still says what it measured, so a threshold can be chosen from it
     assert!(!never_log.contains("Repeat-driven overlaps"));
+    assert!(never_log.contains("Overlap composition: internal matches account for"));
 }
 
 #[test]
 fn an_input_without_repeats_is_left_alone() {
     let input = reads_sharing_a_repeat(0);
-    let (never, _) = estimate(&input, "never", &[]);
-    let (auto, auto_log) = estimate(&input, "auto", &[]);
+    let (never, _) = estimate(&input, None, &[]);
+    let (auto, auto_log) = estimate(&input, Some("0.8"), &[]);
 
     assert!(
         auto_log.contains("Repeat-driven overlaps not detected"),
@@ -120,9 +128,9 @@ fn an_input_without_repeats_is_left_alone() {
 #[test]
 fn the_inverse_mapping_path_reaches_the_same_verdict() {
     let input = reads_sharing_a_repeat(REPEAT_READS);
-    let (never, _) = estimate(&input, "never", &["--use-min-ref"]);
-    let (always, _) = estimate(&input, "always", &["--use-min-ref"]);
-    let (auto, auto_log) = estimate(&input, "auto", &["--use-min-ref"]);
+    let (never, _) = estimate(&input, None, &["--use-min-ref"]);
+    let (always, _) = estimate(&input, Some("0"), &["--use-min-ref"]);
+    let (auto, auto_log) = estimate(&input, Some("0.8"), &["--use-min-ref"]);
 
     assert!(auto_log.contains("Repeat-driven overlaps detected"));
     assert_eq!(auto, always);
@@ -142,30 +150,60 @@ fn all_vs_all_reaches_the_same_verdict() {
         "--normalize",
         "never",
     ];
-    let with = |mode: &str| {
+    let with = |share: Option<&str>| {
         let mut arguments = arguments.to_vec();
-        arguments.extend(["--filter-contained", mode]);
+        if let Some(share) = share {
+            arguments.extend(["-F", "--internal-match-share", share]);
+        }
         run(&input, &arguments)
     };
 
-    let (never, _) = with("never");
-    let (always, _) = with("always");
-    let (auto, auto_log) = with("auto");
+    let (never, _) = with(None);
+    let (always, _) = with(Some("0"));
+    let (auto, auto_log) = with(Some("0.8"));
 
     assert!(auto_log.contains("Repeat-driven overlaps detected"));
     assert_eq!(auto, always);
     assert!(never < auto);
 }
 
-/// Bare `-F` meant "filter everything" before it took a mode, and the estimate it gave has to be
-/// the estimate it still gives.
+/// Bare `-F` is the fitted share, so on an input built out of internal matches it filters, and on
+/// one built without them it does not.
 #[test]
-fn a_bare_filter_flag_still_filters_everything() {
-    let input = reads_sharing_a_repeat(REPEAT_READS);
-    let (always, _) = estimate(&input, "always", &[]);
+fn a_bare_filter_flag_uses_the_fitted_share() {
+    let repeats = reads_sharing_a_repeat(REPEAT_READS);
+    let (at_default, _) = estimate(&repeats, Some("0.8"), &[]);
     let mut arguments = ARGUMENTS.to_vec();
     arguments.push("-F");
-    let (bare, _) = run(&input, &arguments);
+    let (bare, _) = run(&repeats, &arguments);
 
-    assert_eq!(bare, always);
+    assert_eq!(bare, at_default);
+
+    let plain = reads_sharing_a_repeat(0);
+    let (unfiltered, _) = estimate(&plain, None, &[]);
+    let mut arguments = ARGUMENTS.to_vec();
+    arguments.push("-F");
+    let (bare_on_plain, _) = run(&plain, &arguments);
+
+    assert_eq!(bare_on_plain, unfiltered);
+}
+
+/// The share the caller gives is the one that decides, so the same input filters at a low threshold
+/// and does not at one above its share.
+#[test]
+fn the_share_the_caller_gives_is_the_one_that_decides() {
+    let input = reads_sharing_a_repeat(REPEAT_READS);
+    let (unfiltered, _) = estimate(&input, None, &[]);
+    let (low, low_log) = estimate(&input, Some("0.1"), &[]);
+    let (high, high_log) = estimate(&input, Some("0.99"), &[]);
+
+    assert!(low_log.contains("Repeat-driven overlaps detected"));
+    assert!(low_log.contains("against a threshold of 10.0%"));
+    assert!(high_log.contains("Repeat-driven overlaps not detected"));
+    assert!(high_log.contains("against a threshold of 99.0%"));
+    assert!(unfiltered < low);
+    assert_eq!(
+        high, unfiltered,
+        "a share nothing can clear must change nothing"
+    );
 }

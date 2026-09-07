@@ -196,22 +196,22 @@ Arguments:
   <INPUT>  Input FASTQ, FASTA, or unaligned BAM/CRAM/SAM file
 
 Options:
-  -o, --output <OUTPUT>            Output file for the estimate [default: -]
-  -T, --target <INT>               Target number of reads to use (for two-set strategy; default) [default: 10000]
-  -Q, --query <INT>                Query number of reads to use (for two-set strategy; default) [default: 5000]
-  -n, --num <INT>                  Number of reads to use (for all-vs-all strategy)
-  -P, --platform <PLATFORM>        Sequencing platform of the reads [default: ont] [possible values: ont, pb]
-      --normalize <MODE>           Control depth-aware read normalization [default: auto]
-      --shortfall <MODE>           How to split an input too small to supply both read sets [scale, target] [default: scale]
-  -F, --filter-contained [<MODE>]  Exclude overlaps for internal matches [never, auto, always] [default: never]
-  -t, --threads <INT>              Number of threads to use [default: 1]
-  -C, --keep-temp                  Don't clean up temporary files
-  -D, --temp <DIR>                 Temporary directory for storing intermediate files
-  -s, --seed <INT>                 Random seed to use - making the estimate repeatable
-  -q, --quiet...                   `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
-  -v, --verbose...                 `-v` show debug output. `-vv` show trace output
-  -h, --help                       Print help (see more with '--help')
-  -V, --version                    Print version
+  -o, --output <OUTPUT>      Output file for the estimate [default: -]
+  -T, --target <INT>         Target number of reads to use (for two-set strategy; default) [default: 10000]
+  -Q, --query <INT>          Query number of reads to use (for two-set strategy; default) [default: 5000]
+  -n, --num <INT>            Number of reads to use (for all-vs-all strategy)
+  -P, --platform <PLATFORM>  Sequencing platform of the reads [default: ont] [possible values: ont, pb]
+      --normalize <MODE>     Control depth-aware read normalization [default: auto]
+      --shortfall <MODE>     How to split an input too small to supply both read sets [scale, target] [default: scale]
+  -F, --filter-contained     Exclude overlaps that are internal matches from repeat-driven runs
+  -t, --threads <INT>        Number of threads to use [default: 1]
+  -C, --keep-temp            Don't clean up temporary files
+  -D, --temp <DIR>           Temporary directory for storing intermediate files
+  -s, --seed <INT>           Random seed to use - making the estimate repeatable
+  -q, --quiet...             `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
+  -v, --verbose...           `-v` show debug output. `-vv` show trace output
+  -h, --help                 Print help (see more with '--help')
+  -V, --version              Print version
 ```
 
 ### Full usage
@@ -322,12 +322,17 @@ Arguments:
 
           [default: scale]
 
-  -F, --filter-contained [<MODE>]
-          Exclude overlaps for internal matches [never, auto, always]
+  -F, --filter-contained
+          Exclude overlaps that are internal matches from repeat-driven runs
           
-          An internal match is an alignment sitting in the middle of both reads with long unaligned tails either side, which is what two reads sharing a repeat look like. `auto` measures how much of the overlap evidence they account for and excludes them only when that share is high enough to say the overlaps are driven by repeats. Given with no value, this is `always`.
+          An internal match is an alignment sitting in the middle of both reads with long unaligned tails either side, which is what two reads sharing a repeat look like. Excluding them can only raise an estimate, and on most inputs that is the wrong direction, so this is off unless asked for. A run that is asked measures what share of its overlaps they account for and excludes them only above --internal-match-share.
+
+      --internal-match-share <FLOAT>
+          Share of a run's overlaps that internal matches must exceed before -F excludes them
           
-          [default: never]
+          The default was fitted on the paper's benchmark as the highest share among runs LRGE already sizes correctly, so that filtering disturbs none of them. It is a starting point rather than a settled constant: lower it to catch more repeat-driven runs at the cost of some correct ones, and give 0 to exclude every internal match whatever the share, which is what -F did before it had a threshold.
+          
+          [default: 0.8]
 
   -t, --threads <INT>
           Number of threads to use
@@ -362,7 +367,7 @@ Arguments:
       --max-overhang-ratio <FLOAT>
           Maximum overhang size to alignment length ratio for internal overlap filtering
 
-          This is what decides whether a mapping is an internal match, so it applies to `auto` as well as `always`. Only meaningful alongside -F/--filter-contained, which this option requires.
+          This decides whether a single mapping is an internal match, where --internal-match-share decides how many of them a run has to have. Only meaningful alongside -F/--filter-contained, which this option requires.
 
           [default: 0.2]
 
@@ -473,39 +478,46 @@ nothing like the end-to-end overlap two reads from the same locus make. An estim
 target count by the read's overlap count, so counting those alignments as overlaps drives the
 estimate down, and on a repeat-rich input it drives it down several fold.
 
-`-F/--filter-contained` drops them, and takes a mode: `never` (the default), `always` (what bare
-`-F` has always meant), and `auto`. Under `auto` the pass that collects overlaps also counts what
-the filter would have discarded, and drops them only when they account for more than 80% of the
-run's overlaps. Both counts come out of the one pass, so `auto` costs nothing measurable: over the
-whole benchmark its median wall clock and peak memory are both 1.00x of the same run without it.
+`-F/--filter-contained` drops them, and is off by default. A run given it measures what share of
+its overlaps internal matches account for during the pass that collects them, and drops them only
+above `--internal-match-share`, which defaults to 0.8. Both counts come out of the one pass, so the
+measuring costs nothing: over the whole benchmark a filtered run's median wall clock and peak memory
+are both 1.00x of the same run without the flag.
 
-The default is `never`, and the benchmark is why. Over its 3,370 accessions the internal-match share
+The default is off, and the benchmark is why. Over its 3,370 accessions the internal-match share
 turns out to mark repeat-rich genomes rather than underestimated ones, and repeat-rich genomes
 already read *high*: going from the lowest decile of the share to the highest, the median estimate
 climbs from 0.995x of the truth to 1.245x, and the runs landing within 10% fall from 319 in 337 to
-82 in 337. So filtering on a high share usually makes an overestimate worse. `auto` fires on 30 of
-the 3,370, and while 8 of those were reading low and 6 come back into the band, the other 22 were
-already reading high and every one is pushed further out.
+82 in 337. So filtering on a high share usually makes an overestimate worse. At 0.8 the flag fires
+on 30 of the 3,370, and while 8 of those were reading low and 6 come back into the band, the other
+22 were already reading high and every one is pushed further out.
 
-| mode | within 10% of the truth | under half the true size | mean \|log2\| error |
+| | within 10% of the truth | under half the true size | mean \|log2\| error |
 |---|---|---|---|
-| `-F never` (the default) | 2006 | 13 | 0.2195 |
-| `-F auto` | 2012 | 6 | 0.2286 |
-| `-F always` | 814 | 1 | 0.5045 |
+| no `-F` (the default) | 2006 | 13 | 0.2195 |
+| `-F` | 2012 | 6 | 0.2286 |
+| `-F --internal-match-share 0` | 814 | 1 | 0.5045 |
 
-That is the trade `auto` offers: it halves the runs that estimate under half their true size and
+That is the trade `-F` offers: it halves the runs that estimate under half their true size and
 disturbs no run that was already correct, and it pays for that with a slightly worse error overall.
 Reach for it when an estimate looks far too low on a genome you have reason to think is repeat-rich.
-`-vv` reports the share on every run, so you can see where an input sits without changing the
-estimate.
+`-vv` reports the share on every run, whether or not the flag is given, so one ordinary run tells
+you where an input sits before you decide:
 
-The threshold is where it is because 0.796 is the highest share among benchmark runs the estimator
-already puts within 10% of the truth: 80% is the first value that leaves all of them alone. The
-measurements are in
+```
+Overlap composition: internal matches account for 92.8% of 386290 overlaps
+```
+
+`--internal-match-share` is a starting point rather than a settled constant, which is why it is
+exposed. The default is where it is because 0.796 is the highest share among benchmark runs the
+estimator already sizes correctly, so 0.8 is the first value that leaves all of them alone. Lowering
+it catches more repeat-driven runs and starts costing correct ones; a share of 0 drops every
+internal match whatever the run looks like, which is what `-F` did before it had a threshold and is
+the worst of the three columns above. The measurements are in
 [`paper/corrections/README_issue36.md`](paper/corrections/README_issue36.md).
 
-`--max-overhang-ratio` sets how much overhang makes an alignment an internal match, and applies to
-`auto` as much as to `always`.
+`--max-overhang-ratio` sets how much overhang makes a single alignment an internal match, where
+`--internal-match-share` sets how many of them a run has to have before they are dropped.
 
 ### Two-set strategy
 
