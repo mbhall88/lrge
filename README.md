@@ -412,9 +412,12 @@ starts to turn on which reads happened to be drawn rather than on the input.
 Building the full depth profile that normalization needs costs a second pass over the input, so LRGE
 only takes that pass once it has decided to normalize. That pass and the scoring of every read
 against the finished profile both use the thread count given to `--threads`. An input with no
-detected skew therefore costs little more than `--normalize never`: over the benchmark accessions
-where the detector does not fire, `auto` runs at 1.01x the wall clock and 1.02x the peak memory.
-Where it does fire the run is usually quicker, because normalization leaves fewer reads to overlap.
+detected skew therefore costs little more than `--normalize never`: over the 3,184 benchmark
+accessions where the detector does not fire, `auto` runs at 1.02x the wall clock and 1.02x the peak
+memory. Over the 186 where it does fire, the median is 1.09x, and 74 of them come out faster than
+the same run unnormalized, because normalization leaves fewer reads to overlap. What normalizing
+reliably does is shorten the tail: the slowest benchmark run takes 943 seconds unnormalized and 452
+normalized.
 
 Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
 disable both detection and normalization. Forcing normalization still runs detection, because the
@@ -470,31 +473,35 @@ nothing like the end-to-end overlap two reads from the same locus make. An estim
 target count by the read's overlap count, so counting those alignments as overlaps drives the
 estimate down, and on a repeat-rich input it drives it down several fold.
 
-`-F/--filter-contained` drops them. Turning it on for every input is not the answer: filtering can
-only remove overlaps, so it can only push estimates up. Over 27 accessions whose true size is
-known it moved every one of them up, by 8% on the mildest and more than sevenfold on the worst, and
-the 13 that were already within 10% of the truth all ended up 8 to 24 percent too high.
+`-F/--filter-contained` drops them, and takes a mode: `never` (the default), `always` (what bare
+`-F` has always meant), and `auto`. Under `auto` the pass that collects overlaps also counts what
+the filter would have discarded, and drops them only when they account for more than 80% of the
+run's overlaps. Both counts come out of the one pass, so `auto` costs nothing measurable: over the
+whole benchmark its median wall clock and peak memory are both 1.00x of the same run without it.
 
-So `-F auto` measures instead. The pass that collects overlaps can count what the filter would have
-discarded without discarding it, which costs a second set of overlap identities per query read and
-no extra mapping. On those 27 accessions the two populations separate: every run already within 10%
-of the truth has internal matches accounting for at most 61% of its overlaps, while six of the seven
-the filter rescues are at 78% or more. LRGE filters above 70%, in the middle of that gap, and says
-so at WARN level when it does.
+The default is `never`, and the benchmark is why. Over its 3,370 accessions the internal-match share
+turns out to mark repeat-rich genomes rather than underestimated ones, and repeat-rich genomes
+already read *high*: going from the lowest decile of the share to the highest, the median estimate
+climbs from 0.995x of the truth to 1.245x, and the runs landing within 10% fall from 319 in 337 to
+82 in 337. So filtering on a high share usually makes an overestimate worse. `auto` fires on 30 of
+the 3,370, and while 8 of those were reading low and 6 come back into the band, the other 22 were
+already reading high and every one is pushed further out.
 
-| mode | within 10% of the truth | under half the true size |
-|---|---|---|
-| `-F never` (the default) | 13 | 12 |
-| `-F always` | 9 | 1 |
-| `-F auto` | 19 | 4 |
+| mode | within 10% of the truth | under half the true size | mean \|log2\| error |
+|---|---|---|---|
+| `-F never` (the default) | 2006 | 13 | 0.2195 |
+| `-F auto` | 2012 | 6 | 0.2286 |
+| `-F always` | 814 | 1 | 0.5045 |
 
-`auto` engaged on eight of the 27 and disturbed none of the thirteen that were already right. Bare
-`-F` still means `always`, which is what it has always meant.
+That is the trade `auto` offers: it halves the runs that estimate under half their true size and
+disturbs no run that was already correct, and it pays for that with a slightly worse error overall.
+Reach for it when an estimate looks far too low on a genome you have reason to think is repeat-rich.
+`-vv` reports the share on every run, so you can see where an input sits without changing the
+estimate.
 
-The default is `never`, and stays there until the rule is fitted on something broader. Those 27
-accessions were collected because they were hard, not because they were representative, so they say
-that the signal exists and separates cleanly, not where the threshold belongs across a whole
-benchmark. The measurements are in
+The threshold is where it is because 0.796 is the highest share among benchmark runs the estimator
+already puts within 10% of the truth: 80% is the first value that leaves all of them alone. The
+measurements are in
 [`paper/corrections/README_issue36.md`](paper/corrections/README_issue36.md).
 
 `--max-overhang-ratio` sets how much overhang makes an alignment an internal match, and applies to

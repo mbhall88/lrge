@@ -25,33 +25,32 @@ use crate::InternalFilter;
 
 // How much of the overlap evidence has to be internal matches before a run filters them out.
 //
-// This was fitted the way the depth-skew constants were, on runs whose genome size is known, but on
-// far fewer of them: the 27 accessions held locally rather than the paper's whole benchmark. Those
-// 27 were chosen to be rich in the failures depth normalization leaves behind, so they say more
-// about where the filter helps than about how often it is asked for.
+// Fitted on the paper's whole benchmark, 3,370 accessions whose genome size is known, each run made
+// both unfiltered and filtered so every threshold could be scored against the same reads. An
+// earlier version of this constant was fitted on 27 outlier-enriched accessions and sat at 0.7. The
+// benchmark moved it, and more usefully, it explained why the smaller set was misleading.
 //
-// What those 27 say is that the runs already within 10% of their true size are all quiet: the
-// highest of the thirteen sits at 0.607, so any threshold above that leaves every one of them
-// untouched. The runs the filter rescues are not so tidy. Six of the seven sit at 0.778 or above,
-// well clear of the quiet population, but the seventh sits at 0.424, in among them, and no
-// threshold can take it without taking correct runs too.
+// The share is not a marker of underestimation. It is a marker of repeats, and over the benchmark
+// the two point opposite ways: from the lowest decile of the share to the highest, the median
+// estimate climbs from 0.995x of the truth to 1.245x, and the runs landing within 10% fall from 319
+// in 337 to 82. Filtering a high-share run therefore usually makes an overestimate worse, which is
+// why this mode is not the default, and why the threshold sits where it does rather than where the
+// rescues are densest.
 //
-// So the useful range is everything between those two populations, and across the whole of
-// (0.607, 0.778) the outcome is the same: 19 of the 27 land within 10% of the truth, against 13 for
-// never filtering and 9 for always filtering, and no run that was already correct is disturbed.
-// This sits in the middle of that range, so neither edge is close.
+// What the benchmark asks of the threshold is that it disturb nothing that was already right. The
+// highest share among runs the estimator already puts within 10% of the truth is 0.796, so 0.8 is
+// the first value that touches none of them, and it is also where the count landing within 10%
+// peaks. It fires on 30 of the 3,370. Eight of those were reading low and six come back into the
+// band; the other 22 were already reading high and every one of them is pushed further out.
 //
-// Four runs still fail under it, and they fail because they need the filter without looking like
-// it. `SRR10259778` is the clearest: filtering multiplies its estimate by 3.79 and brings it into
-// range, on an internal-match share of 0.26. Whatever separates it from the runs that sit at the
-// same share and are already correct is not in this statistic.
+// That trade is worth having as a mode and not as a default. It takes the runs estimating under
+// half their true size from 13 to 6, which is the failure this exists for, and costs no run that
+// was correct. It still raises the mean |log2| error over the benchmark, from 0.2195 to 0.2286,
+// because of those 22.
 //
-// Those figures come from an instrumented pass, in
-// `paper/corrections/issue36_internal_match_probe.tsv`, and were then reproduced by running the
-// same 27 accessions through this code in all three modes:
-// `paper/corrections/issue36_dynamic_filter.tsv`. The argument is in
+// The runs are in `paper/corrections/issue36_filter_benchmark_summary.tsv` and the argument is in
 // `paper/corrections/README_issue36.md`.
-pub(crate) const INTERNAL_MATCH_THRESHOLD: f64 = 0.7;
+pub(crate) const INTERNAL_MATCH_THRESHOLD: f64 = 0.8;
 
 /// Counts what internal-match filtering would discard, on a run that has not decided to discard it.
 ///
@@ -197,24 +196,19 @@ mod tests {
         assert!(!on_it.repeat_driven());
     }
 
-    /// The gap the constant was fitted into: the noisiest run that is already correct, and the
-    /// quietest run the filter has to rescue. Neither may end up on the wrong side of the
-    /// threshold. See [`INTERNAL_MATCH_THRESHOLD`].
+    /// What the benchmark asks of the threshold: leave alone every run the estimator already puts
+    /// within 10% of the truth. The noisiest of those over 3,370 accessions is `SRR13170267`, at a
+    /// share of 0.796, and filtering it would take it from 1.095x to 4.169x. See
+    /// [`INTERNAL_MATCH_THRESHOLD`].
     #[test]
-    fn the_fitted_populations_fall_either_side_of_the_threshold() {
+    fn the_noisiest_already_correct_run_stays_below_the_threshold() {
         let at = |fraction: f64| {
             let total = 1_000_000;
             report(total, (total as f64 * (1.0 - fraction)).round() as u64)
         };
 
-        assert!(
-            !at(0.607_020).repeat_driven(),
-            "SRR26465560 is already correct"
-        );
-        assert!(
-            at(0.777_531).repeat_driven(),
-            "SRR30357566 needs the filter"
-        );
+        assert!(!at(0.796).repeat_driven(), "SRR13170267 is already correct");
+        assert!(at(0.845).repeat_driven(), "SRR30357565 needs the filter");
     }
 
     #[test]
