@@ -1,8 +1,37 @@
 //! A trait for generating genome size estimates, and calculating the median of those estimates.
 
-/// The lower quantile we found to give the highest confidence in our analysis.
+/// The lower quantile of the reported interval for Nanopore reads.
+///
+/// Fitted on the paper's benchmark; see
+/// [`Platform::interval_quantiles`][crate::Platform::interval_quantiles].
+pub const NANOPORE_LOWER_QUANTILE: f32 = 0.205;
+/// The upper quantile of the reported interval for Nanopore reads.
+///
+/// Fitted on the paper's benchmark; see
+/// [`Platform::interval_quantiles`][crate::Platform::interval_quantiles].
+pub const NANOPORE_UPPER_QUANTILE: f32 = 0.635;
+/// The lower quantile of the reported interval for PacBio reads.
+///
+/// Fitted on the paper's benchmark; see
+/// [`Platform::interval_quantiles`][crate::Platform::interval_quantiles].
+pub const PACBIO_LOWER_QUANTILE: f32 = 0.01;
+/// The upper quantile of the reported interval for PacBio reads.
+///
+/// Fitted on the paper's benchmark; see
+/// [`Platform::interval_quantiles`][crate::Platform::interval_quantiles].
+pub const PACBIO_UPPER_QUANTILE: f32 = 0.615;
+
+/// The lower quantile the paper fitted across both platforms.
+#[deprecated(
+    since = "1.0.0",
+    note = "the interval quantiles are now fitted per platform; use `Platform::interval_quantiles`"
+)]
 pub const LOWER_QUANTILE: f32 = 0.15;
-/// The upper quantile we found to give the highest confidence in our analysis.
+/// The upper quantile the paper fitted across both platforms.
+#[deprecated(
+    since = "1.0.0",
+    note = "the interval quantiles are now fitted per platform; use `Platform::interval_quantiles`"
+)]
 pub const UPPER_QUANTILE: f32 = 0.65;
 
 pub struct EstimateResult {
@@ -37,9 +66,9 @@ pub trait Estimate {
     /// * `upper_quant`: The upper percentile to calculate. If `None`, this will not be calculated.
     ///   This value should be between 0.5 and 1.0. So, for the 75th percentile, you would pass `0.75`.
     ///
-    /// In [our analysis][doi], we found that the 15th and 65th percentiles gave the highest confidence (~92%).
-    /// If you want to use our most current recommended values, you can use the constants [`LOWER_QUANTILE`]
-    /// and [`UPPER_QUANTILE`]. You can of course use any values you like.
+    /// Which pair to pass depends on the platform, because the truth sits in a different part of
+    /// the per-read distribution for each. [`Platform::interval_quantiles`][crate::Platform::interval_quantiles]
+    /// hands back the pair fitted for one. You can of course use any values you like.
     ///
     /// # Returns
     ///

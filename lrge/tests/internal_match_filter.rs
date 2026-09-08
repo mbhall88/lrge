@@ -208,3 +208,88 @@ fn the_share_the_caller_gives_is_the_one_that_decides() {
         "a share nothing can clear must change nothing"
     );
 }
+
+/// The per-read estimates traced on one line each, as `(kept-every-overlap, internal-matches-removed)`.
+///
+/// A run that was not asked to filter prints one number, and it is the first of the pair.
+fn traced_estimates(log: &str) -> Vec<(f64, f64)> {
+    log.lines()
+        .filter_map(|line| line.split_once("Estimate for "))
+        .filter_map(|(_, rest)| rest.split_once(": "))
+        .map(
+            |(_, values)| match values.split_once(" (excluding internal matches: ") {
+                Some((unfiltered, filtered)) => (
+                    unfiltered.parse().unwrap(),
+                    filtered.trim_end_matches(')').parse().unwrap(),
+                ),
+                None => {
+                    let estimate = values.parse().unwrap();
+                    (estimate, estimate)
+                }
+            },
+        )
+        .collect()
+}
+
+/// The median of the finite estimates, which is how liblrge takes one.
+fn median(mut values: Vec<f64>) -> f64 {
+    values.retain(|value| value.is_finite());
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert!(!values.is_empty(), "no finite estimates were traced");
+
+    let position = 0.5 * (values.len() - 1) as f64;
+    let index = position.floor() as usize;
+    let fraction = position - index as f64;
+    match values.get(index + 1) {
+        Some(next) => values[index] * (1.0 - fraction) + next * fraction,
+        None => values[index],
+    }
+}
+
+/// The per-read estimates a `-vv` run prints have to be the ones its answer comes from.
+///
+/// They were not. The trace printed the estimate with internal matches removed, on every run,
+/// while a run that had not asked for them to be removed took its median from the estimates that
+/// kept them. On this input the two differ by more than a factor of two.
+#[test]
+fn the_per_read_estimates_a_run_prints_are_the_ones_it_takes_its_answer_from() {
+    let input = reads_sharing_a_repeat(REPEAT_READS);
+    let (reported, log) = estimate(&input, None, &[]);
+
+    let traced = traced_estimates(&log);
+    assert!(
+        !traced.is_empty(),
+        "no per-read estimates were traced:\n{log}"
+    );
+    let from_the_log = median(traced.iter().map(|(unfiltered, _)| *unfiltered).collect());
+
+    assert!(
+        (from_the_log - reported as f64).abs() <= 1.0,
+        "the run reported {reported} but its traced estimates have a median of {from_the_log}"
+    );
+}
+
+/// A run that asked for the filter has not decided whether to engage it while it is still mapping,
+/// so it prints both numbers for any read the two disagree on, and its answer comes from the
+/// second.
+#[test]
+fn a_filtering_run_prints_both_estimates_for_a_read_with_internal_matches() {
+    let input = reads_sharing_a_repeat(REPEAT_READS);
+    let (reported, log) = estimate(&input, Some("-F=0"), &[]);
+
+    let traced = traced_estimates(&log);
+    let disagreeing = traced
+        .iter()
+        .filter(|(unfiltered, filtered)| unfiltered != filtered)
+        .count();
+    assert!(
+        disagreeing > 0,
+        "an input built out of internal matches traced none:\n{log}"
+    );
+    let from_the_log = median(traced.iter().map(|(_, filtered)| *filtered).collect());
+
+    assert!(
+        (from_the_log - reported as f64).abs() <= 1.0,
+        "the run reported {reported} but the estimates it filtered to have a median of {from_the_log}"
+    );
+}

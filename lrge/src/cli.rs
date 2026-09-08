@@ -7,6 +7,12 @@ const QUERY_NUM_READS: &str = "5000";
 const MAX_OVERHANG_RATIO: &str = "0.2";
 const INTERNAL_MATCH_THRESHOLD: &str = "0.8";
 const MAX_READ_BUFFER: &str = "1G";
+// The interval quantiles, as strings so that clap can show them as defaults. `quantile_defaults_match_the_library`
+// keeps them in step with the values liblrge fitted.
+const NANOPORE_LOWER_QUANTILE: &str = "0.205";
+const NANOPORE_UPPER_QUANTILE: &str = "0.635";
+const PACBIO_LOWER_QUANTILE: &str = "0.01";
+const PACBIO_UPPER_QUANTILE: &str = "0.615";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -84,11 +90,18 @@ pub struct Args {
     pub precise: bool,
 
     /// The lower quantile to use for the estimate
-    #[arg(long = "q1", value_name = "FLOAT", default_value_t = liblrge::estimate::LOWER_QUANTILE, value_parser = validate_low_quantile, hide_short_help = true)]
+    ///
+    /// The interval is read off the estimates the run made from its own reads, and the true size
+    /// sits in a different part of that spread on each platform, so the default follows -P: 0.205
+    /// for nanopore and 0.01 for PacBio. Each pair is the narrowest covering the truth on 95% of
+    /// that platform's runs in the paper's benchmark.
+    #[arg(long = "q1", value_name = "FLOAT", default_value = NANOPORE_LOWER_QUANTILE, default_value_if("platform", "pb", PACBIO_LOWER_QUANTILE), value_parser = validate_low_quantile, hide_short_help = true)]
     pub lower_q: f32,
 
     /// The upper quantile to use for the estimate
-    #[arg(long = "q3", value_name = "FLOAT", default_value_t = liblrge::estimate::UPPER_QUANTILE, value_parser = validate_high_quantile, hide_short_help = true)]
+    ///
+    /// The default follows -P, as --q1 does: 0.635 for nanopore and 0.615 for PacBio.
+    #[arg(long = "q3", value_name = "FLOAT", default_value = NANOPORE_UPPER_QUANTILE, default_value_if("platform", "pb", PACBIO_UPPER_QUANTILE), value_parser = validate_high_quantile, hide_short_help = true)]
     pub upper_q: f32,
 
     /// Maximum overhang size to alignment length ratio for internal overlap filtering
@@ -648,5 +661,54 @@ mod tests {
 
         assert_eq!(opts.filter_contained, None);
         assert_eq!(opts.max_overhang_ratio, MAX_OVERHANG_RATIO.parse().unwrap());
+    }
+
+    #[test]
+    fn cli_quantile_defaults_match_the_library() {
+        // clap needs the defaults as strings; keep them in step with the values liblrge fitted
+        assert_eq!(
+            (
+                NANOPORE_LOWER_QUANTILE.parse::<f32>().unwrap(),
+                NANOPORE_UPPER_QUANTILE.parse::<f32>().unwrap()
+            ),
+            liblrge::Platform::Nanopore.interval_quantiles()
+        );
+        assert_eq!(
+            (
+                PACBIO_LOWER_QUANTILE.parse::<f32>().unwrap(),
+                PACBIO_UPPER_QUANTILE.parse::<f32>().unwrap()
+            ),
+            liblrge::Platform::PacBio.interval_quantiles()
+        );
+    }
+
+    #[test]
+    fn cli_quantile_defaults_follow_the_platform() {
+        for (platform, expected) in [
+            (None, liblrge::Platform::Nanopore),
+            (Some("ont"), liblrge::Platform::Nanopore),
+            (Some("pb"), liblrge::Platform::PacBio),
+        ] {
+            let mut argv = vec![BIN, "Cargo.toml"];
+            if let Some(platform) = platform {
+                argv.extend(["-P", platform]);
+            }
+            let opts = Args::try_parse_from(argv).unwrap();
+
+            assert_eq!(
+                (opts.lower_q, opts.upper_q),
+                expected.interval_quantiles(),
+                "platform: {platform:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cli_quantiles_given_on_the_command_line_beat_the_platform_default() {
+        let opts =
+            Args::try_parse_from([BIN, "Cargo.toml", "-P", "pb", "--q1", "0.1", "--q3", "0.9"])
+                .unwrap();
+
+        assert_eq!((opts.lower_q, opts.upper_q), (0.1, 0.9));
     }
 }

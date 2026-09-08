@@ -151,8 +151,8 @@ Estimate the genome size of a set of *Mycobacterium tuberculosis* ONT [reads](ht
 $ wget -O reads.fq.gz "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR283/049/SRR28370649/SRR28370649_1.fastq.gz"
 $ lrge -t 8 reads.fq.gz
 [2024-11-22T03:49:53Z INFO  lrge] Running two-set strategy with 10000 target reads and 5000 query reads
-[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.43 Mbp (IQR: 3.16 Mbp - 4.99 Mbp)
-4426642
+[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.44 Mbp (95% CI: 3.48 Mbp - 4.95 Mbp)
+4437120
 [2024-11-22T03:50:10Z INFO  lrge] Done!
 ```
 
@@ -161,10 +161,10 @@ The size estimate is printed to stdout, but you can also save it to a file with 
 ```
 $ lrge -t 8 reads.fq.gz -o size.txt
 [2024-11-22T03:49:53Z INFO  lrge] Running two-set strategy with 10000 target reads and 5000 query reads
-[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.43 Mbp (IQR: 3.16 Mbp - 4.99 Mbp)
+[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.44 Mbp (95% CI: 3.48 Mbp - 4.95 Mbp)
 [2024-11-22T03:50:10Z INFO  lrge] Done!
 $ cat size.txt
-4426642
+4437120
 ```
 
 By default, LRGE uses the [two-set strategy](#two-set-strategy) with 10,000 target reads (`-T`) and 5,000 query reads 
@@ -253,12 +253,18 @@ If you don't want the estimate to be rounded to the nearest integer 🤓
 $ lrge --float-my-boat reads.fq
 ```
 
-In [the paper][doi], we suggest using the 15th and 65th percentiles of the estimates to get a ~92% confidence interval. 
-However, you can change these
+The interval printed beside the estimate is a pair of percentiles of the per-read estimates, and
+which pair depends on `-P`, because the true size sits in a different part of that spread on each
+platform. Nanopore reads get the 20.5th and 63.5th percentiles and PacBio reads the 1st and
+61.5th, each the narrowest pair covering the truth on 95% of that platform's runs in [the
+paper][doi]'s benchmark. You can use any pair you like
 
 ```
 $ lrge --q1 0.25 --q3 0.75 reads.fq
 ```
+
+A run given a pair of its own names it in the output rather than calling it a 95% interval, because
+what such a pair covers has not been measured.
 
 If you want to see the estimate for each read, turn on trace level logging
 
@@ -287,7 +293,7 @@ Arguments:
   <INPUT>
           Input FASTQ, FASTA, or unaligned BAM/CRAM/SAM file
 
-  Options:
+Options:
   -o, --output <OUTPUT>
           Output file for the estimate
 
@@ -324,9 +330,9 @@ Arguments:
 
   -F, --filter-contained[=<SHARE>]
           Exclude internal matches above this share of a run's overlaps [default when given: 0.8]
-          
+
           An internal match is an alignment sitting in the middle of both reads with long unaligned tails either side, which is what two reads sharing a repeat look like. Excluding them can only raise an estimate, and on most inputs that is the wrong direction, so this is off unless asked for. Given as a bare -F, a run measures what share of its overlaps they account for and excludes them above the share fitted on the paper's benchmark, which is the highest among runs LRGE already sizes correctly, so that filtering disturbs none of them.
-          
+
           That share is a starting point rather than a settled constant, so it can be given instead, written with an equals sign: -F=0.5 catches more repeat-driven runs at the cost of some correct ones, and -F=0 excludes every internal match whatever the share, which is what -F did before it had a threshold.
 
   -t, --threads <INT>
@@ -352,12 +358,16 @@ Arguments:
       --q1 <FLOAT>
           The lower quantile to use for the estimate
 
-          [default: 0.15]
+          The interval is read off the estimates the run made from its own reads, and the true size sits in a different part of that spread on each platform, so the default follows -P: 0.205 for nanopore and 0.01 for PacBio. Each pair is the narrowest covering the truth on 95% of that platform's runs in the paper's benchmark.
+
+          [default: 0.205]
 
       --q3 <FLOAT>
           The upper quantile to use for the estimate
 
-          [default: 0.65]
+          The default follows -P, as --q1 does: 0.635 for nanopore and 0.615 for PacBio.
+
+          [default: 0.635]
 
       --max-overhang-ratio <FLOAT>
           Maximum overhang size to alignment length ratio for internal overlap filtering
@@ -371,9 +381,9 @@ Arguments:
 
       --max-read-buffer <SIZE>
           Cap on the memory used to buffer selected reads when normalizing (e.g. 512M, 1.5G)
-          
+
           Above this, lrge buffers read positions and reads the input one extra time. The reads selected for a given seed are the same either way.
-          
+
           [default: 1G]
 
   -q, --quiet...

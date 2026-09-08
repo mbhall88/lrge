@@ -151,8 +151,8 @@ Estimate the genome size of a set of *Mycobacterium tuberculosis* ONT [reads](ht
 $ wget -O reads.fq.gz "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR283/049/SRR28370649/SRR28370649_1.fastq.gz"
 $ lrge -t 8 reads.fq.gz
 [2024-11-22T03:49:53Z INFO  lrge] Running two-set strategy with 10000 target reads and 5000 query reads
-[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.43 Mbp (IQR: 3.16 Mbp - 4.99 Mbp)
-4426642
+[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.44 Mbp (95% CI: 3.48 Mbp - 4.95 Mbp)
+4437120
 [2024-11-22T03:50:10Z INFO  lrge] Done!
 ```
 
@@ -161,10 +161,10 @@ The size estimate is printed to stdout, but you can also save it to a file with 
 ```
 $ lrge -t 8 reads.fq.gz -o size.txt
 [2024-11-22T03:49:53Z INFO  lrge] Running two-set strategy with 10000 target reads and 5000 query reads
-[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.43 Mbp (IQR: 3.16 Mbp - 4.99 Mbp)
+[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.44 Mbp (95% CI: 3.48 Mbp - 4.95 Mbp)
 [2024-11-22T03:50:10Z INFO  lrge] Done!
 $ cat size.txt
-4426642
+4437120
 ```
 
 By default, LRGE uses the [two-set strategy](#two-set-strategy) with 10,000 target reads (`-T`) and 5,000 query reads 
@@ -196,20 +196,22 @@ Arguments:
   <INPUT>  Input FASTQ, FASTA, or unaligned BAM/CRAM/SAM file
 
 Options:
-  -o, --output <OUTPUT>      Output file for the estimate [default: -]
-  -T, --target <INT>         Target number of reads to use (for two-set strategy; default) [default: 10000]
-  -Q, --query <INT>          Query number of reads to use (for two-set strategy; default) [default: 5000]
-  -n, --num <INT>            Number of reads to use (for all-vs-all strategy)
-  -P, --platform <PLATFORM>  Sequencing platform of the reads [default: ont] [possible values: ont, pb]
-  -F, --filter-contained     Exclude overlaps for internal matches 
-  -t, --threads <INT>        Number of threads to use [default: 1]
-  -C, --keep-temp            Don't clean up temporary files
-  -D, --temp <DIR>           Temporary directory for storing intermediate files
-  -s, --seed <INT>           Random seed to use - making the estimate repeatable
-  -q, --quiet...             `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
-  -v, --verbose...           `-v` show debug output. `-vv` show trace output
-  -h, --help                 Print help (see more with '--help')
-  -V, --version              Print version
+  -o, --output <OUTPUT>             Output file for the estimate [default: -]
+  -T, --target <INT>                Target number of reads to use (for two-set strategy; default) [default: 10000]
+  -Q, --query <INT>                 Query number of reads to use (for two-set strategy; default) [default: 5000]
+  -n, --num <INT>                   Number of reads to use (for all-vs-all strategy)
+  -P, --platform <PLATFORM>         Sequencing platform of the reads [default: ont] [possible values: ont, pb]
+      --normalize <MODE>            Control depth-aware read normalization [default: auto]
+      --shortfall <MODE>            How to split an input too small to supply both read sets [scale, target] [default: scale]
+  -F, --filter-contained[=<SHARE>]  Exclude internal matches above this share of a run's overlaps [default when given: 0.8]
+  -t, --threads <INT>               Number of threads to use [default: 1]
+  -C, --keep-temp                   Don't clean up temporary files
+  -D, --temp <DIR>                  Temporary directory for storing intermediate files
+  -s, --seed <INT>                  Random seed to use - making the estimate repeatable
+  -q, --quiet...                    `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
+  -v, --verbose...                  `-v` show debug output. `-vv` show trace output
+  -h, --help                        Print help (see more with '--help')
+  -V, --version                     Print version
 ```
 
 ### Full usage
@@ -251,12 +253,18 @@ If you don't want the estimate to be rounded to the nearest integer 🤓
 $ lrge --float-my-boat reads.fq
 ```
 
-In [the paper][doi], we suggest using the 15th and 65th percentiles of the estimates to get a ~92% confidence interval. 
-However, you can change these
+The interval printed beside the estimate is a pair of percentiles of the per-read estimates, and
+which pair depends on `-P`, because the true size sits in a different part of that spread on each
+platform. Nanopore reads get the 20.5th and 63.5th percentiles and PacBio reads the 1st and
+61.5th, each the narrowest pair covering the truth on 95% of that platform's runs in [the
+paper][doi]'s benchmark. You can use any pair you like
 
 ```
 $ lrge --q1 0.25 --q3 0.75 reads.fq
 ```
+
+A run given a pair of its own names it in the output rather than calling it a 95% interval, because
+what such a pair covers has not been measured.
 
 If you want to see the estimate for each read, turn on trace level logging
 
@@ -285,7 +293,7 @@ Arguments:
   <INPUT>
           Input FASTQ, FASTA, or unaligned BAM/CRAM/SAM file
 
-  Options:
+Options:
   -o, --output <OUTPUT>
           Output file for the estimate
 
@@ -310,9 +318,23 @@ Arguments:
           [default: ont]
           [possible values: ont, pb]
 
-  -F, --filter-contained
-          Exclude overlaps for internal matches
-          
+      --normalize <MODE>
+          Control depth-aware read normalization
+
+          [default: auto]
+
+      --shortfall <MODE>
+          How to split an input too small to supply both read sets [scale, target]
+
+          [default: scale]
+
+  -F, --filter-contained[=<SHARE>]
+          Exclude internal matches above this share of a run's overlaps [default when given: 0.8]
+
+          An internal match is an alignment sitting in the middle of both reads with long unaligned tails either side, which is what two reads sharing a repeat look like. Excluding them can only raise an estimate, and on most inputs that is the wrong direction, so this is off unless asked for. Given as a bare -F, a run measures what share of its overlaps they account for and excludes them above the share fitted on the paper's benchmark, which is the highest among runs LRGE already sizes correctly, so that filtering disturbs none of them.
+
+          That share is a starting point rather than a settled constant, so it can be given instead, written with an equals sign: -F=0.5 catches more repeat-driven runs at the cost of some correct ones, and -F=0 excludes every internal match whatever the share, which is what -F did before it had a threshold.
+
   -t, --threads <INT>
           Number of threads to use
 
@@ -336,20 +358,33 @@ Arguments:
       --q1 <FLOAT>
           The lower quantile to use for the estimate
 
-          [default: 0.15]
+          The interval is read off the estimates the run made from its own reads, and the true size sits in a different part of that spread on each platform, so the default follows -P: 0.205 for nanopore and 0.01 for PacBio. Each pair is the narrowest covering the truth on 95% of that platform's runs in the paper's benchmark.
+
+          [default: 0.205]
 
       --q3 <FLOAT>
           The upper quantile to use for the estimate
 
-          [default: 0.65]
+          The default follows -P, as --q1 does: 0.635 for nanopore and 0.615 for PacBio.
+
+          [default: 0.635]
 
       --max-overhang-ratio <FLOAT>
           Maximum overhang size to alignment length ratio for internal overlap filtering
+
+          This decides whether a single mapping is an internal match, where the share given to -F decides how many of them a run has to have. Only meaningful alongside -F/--filter-contained, which this option requires.
 
           [default: 0.2]
 
       --use-min-ref
           Use the smaller Q/T dataset as minimap2 reference (for two-set strategy)
+
+      --max-read-buffer <SIZE>
+          Cap on the memory used to buffer selected reads when normalizing (e.g. 512M, 1.5G)
+
+          Above this, lrge buffers read positions and reads the input one extra time. The reads selected for a given seed are the same either way.
+
+          [default: 1G]
 
   -q, --quiet...
           `-q` only show errors and warnings. `-qq` only show errors. `-qqq` shows nothing
@@ -368,6 +403,127 @@ Arguments:
 ## Method
 
 For a full description of the method, see the [paper][doi].
+
+### Uneven read depth
+
+LRGE assumes that sampled reads represent genome positions uniformly. A short plasmid or other
+high-copy sequence can break this assumption by supplying most of the reads, even though it makes
+up little of the genome. The resulting estimate may collapse towards the size of that sequence.
+
+The default `--normalize auto` mode checks minimizer depth before selecting reads. When it detects
+skew, it reduces the chance of retaining reads from high-depth sequence and draws both target and
+query reads from the normalized pool. LRGE reports the skew score and retained read count at WARN
+level so the depth-skewed input is not overlooked. Inputs without detected skew use the original
+sampling path unchanged.
+
+Detection itself is cheap: it draws minimizers from about one read in a hundred and skips the rest.
+On an input too small for that to reach 500 reads it samples more, because below that the verdict
+starts to turn on which reads happened to be drawn rather than on the input.
+Building the full depth profile that normalization needs costs a second pass over the input, so LRGE
+only takes that pass once it has decided to normalize. That pass and the scoring of every read
+against the finished profile both use the thread count given to `--threads`. An input with no
+detected skew therefore costs little more than `--normalize never`: over the 3,184 benchmark
+accessions where the detector does not fire, `auto` runs at 1.02x the wall clock and 1.02x the peak
+memory. Over the 186 where it does fire, the median is 1.09x, and 74 of them come out faster than
+the same run unnormalized, because normalization leaves fewer reads to overlap. What normalizing
+reliably does is shorten the tail: the slowest benchmark run takes 943 seconds unnormalized and 452
+normalized.
+
+Use `--normalize always` to normalize regardless of the skew verdict, or `--normalize never` to
+disable both detection and normalization. Forcing normalization still runs detection, because the
+depth a profile normalizes against is measured over the minimizers detection samples. A sample
+drawn from every read instead would be mostly sequencing error seen in one read only, and its
+median would be the noise floor of the sketch rather than the input's coverage depth.
+
+Thin coverage does not hold normalization back. A shallow input gives a low median depth to
+normalize against, and at a median of one a read is kept or dropped on its own count coming out as
+two rather than three. Six skewed inputs with known genome sizes were subsampled until the median
+depth fell through three, two and one to see what that costs. Across the 46 resulting inputs,
+taking the median of three seeds each, `auto` landed at 0.64x to 0.99x of the true size and
+`--normalize never` at 0.004x to 0.24x; `auto` was nearer on every one of them. An even-depth
+input at the same median depth is still not called skewed, so shallow coverage on its own does not
+trigger normalization.
+
+Both numbers this rests on, the skew score an input must reach and the multiple of median depth
+reads are kept down to, were then fitted on the paper's whole benchmark rather than left where
+argument had put them. All 3,370 accessions were rebuilt from ENA and estimated against every
+combination of skew threshold and retention multiplier. Normalizing is what moves the result: it
+takes the mean |log2| error over the benchmark from 0.237 to 0.219, and the runs estimating under
+half their true size from 25 to 13, of which 11 come back to within 10% of the truth. Where the two
+constants sit inside a wide plateau does not move it, so both were left where they were. The
+procedure, the tables, and the one place the benchmark and the low-depth inputs disagree are in
+[`paper/corrections/README_issue36.md`](paper/corrections/README_issue36.md).
+
+Thirteen runs still estimate under half their true size, and depth normalization is not the
+mechanism that will fix them. Nine keep more than 90% of their reads through normalization, so
+there is almost nothing for it to remove, and on eight of those raven lands within 5% of the truth
+from the same reads. Two are thin enough that genomescope and raven miss them as badly as LRGE
+does. One run, `SRR13009132`, is made worse: normalization drops 79% of its reads and takes it from
+0.66x to 0.48x.
+
+A wide reported interval means the per-read estimates disagree. Uneven depth is one possible cause;
+repeats, sparse overlaps, or too few sampled reads can also widen it. Repeats have their own correction, below.
+
+Normalization holds the reads it selects in memory until sampling finishes, which for a large
+request on long reads can be more memory than a machine has. `--max-read-buffer` caps that buffer,
+1 GB by default. The cap covers the selected reads and nothing else; scoring reads against the
+profile keeps a couple of megabytes of reads per thread in transit, which sits outside it. A request
+projected to need more than the cap is served by a path that buffers read positions instead of read
+sequences, then reads the input a second time to write them out: less memory, one extra pass. Both
+paths pick the same reads for a given seed, so the cap changes what a run costs while the estimate
+stays the same. The projection comes from the mean read length, so a run can
+still buffer past the cap; when it does, it says so and by how much.
+
+### Repeat-driven overlaps
+
+Depth normalization corrects an input whose reads come disproportionately from one part of the
+genome. It cannot correct an input whose *overlaps* come disproportionately from repeats. Two reads
+carrying the same repeat align over it with long unaligned tails hanging off either end, which is
+nothing like the end-to-end overlap two reads from the same locus make. An estimate divides the
+target count by the read's overlap count, so counting those alignments as overlaps drives the
+estimate down, and on a repeat-rich input it drives it down several fold.
+
+`-F/--filter-contained` drops them, and is off by default. A run given it measures what share of its
+overlaps internal matches account for during the pass that collects them, and drops them only above
+a share it can be given: bare `-F` uses 0.8, and `-F=0.5` or `-F=0` set it. Both counts come out of
+the one pass, so the measuring costs nothing: over the whole benchmark a run carrying both has a
+median wall clock and peak memory of 1.00x of one carrying a single count.
+
+The default is off, and the benchmark is why. Over its 3,370 accessions the internal-match share
+turns out to mark repeat-rich genomes rather than underestimated ones, and repeat-rich genomes
+already read *high*: going from the lowest decile of the share to the highest, the median estimate
+climbs from 0.995x of the truth to 1.245x, and the runs landing within 10% fall from 319 in 337 to
+82 in 337. So filtering on a high share usually makes an overestimate worse. At 0.8 the flag fires
+on 30 of the 3,370, and while 8 of those were reading low and 6 come back into the band, the other
+22 were already reading high and every one is pushed further out.
+
+| | within 10% of the truth | under half the true size | mean \|log2\| error |
+|---|---|---|---|
+| no `-F` (the default) | 2006 | 13 | 0.2195 |
+| `-F` | 2012 | 6 | 0.2286 |
+| `-F=0` | 814 | 1 | 0.5045 |
+
+That is the trade `-F` offers: it halves the runs that estimate under half their true size and
+disturbs no run that was already correct, and it pays for that with a slightly worse error overall.
+Reach for it when an estimate looks far too low on a genome you have reason to think is repeat-rich.
+`-vv` reports the share on every run, whether or not the flag is given, so one ordinary run tells
+you where an input sits before you decide:
+
+```
+Overlap composition: internal matches account for 92.8% of 386290 overlaps
+```
+
+The share is a starting point rather than a settled constant, which is why `-F` takes one. The
+default is where it is because 0.796 is the highest share among benchmark runs the estimator already
+sizes correctly, so 0.8 is the first value that leaves all of them alone. Lowering it catches more
+repeat-driven runs and starts costing correct ones; `-F=0` drops every internal match whatever the
+run looks like, which is what `-F` did before it had a share and is the worst of the three rows
+above. The equals sign is required, so that a bare `-F` cannot swallow the argument after it. The
+measurements are in
+[`paper/corrections/README_issue36.md`](paper/corrections/README_issue36.md).
+
+`--max-overhang-ratio` sets how much overhang makes a single alignment an internal match, where the
+share given to `-F` sets how many of them a run has to have before they are dropped.
 
 ### Two-set strategy
 
@@ -390,6 +546,60 @@ We use this strategy as the default as it is the most computationally efficient 
 all-vs-all strategy. We suggest a smaller number of query reads than target reads, as this will speed things up and as 
 we take the median of the estimates, the number of query reads (over a certain point) should not affect the accuracy of 
 the estimate all that much.
+
+That asymmetry is why an input with fewer reads than the two sets ask for is divided between them in
+the requested ratio, both sets shrinking together. An input of 7,473 reads asked for 10,000 target
+and 5,000 query gives 4,982 and 2,491. Up to and including v0.3.0 the whole shortfall came out of
+the target set, giving 2,473 and 5,000, so a request for twice as many target as query reads was
+served with half as many. To see what that costs, a pool of about 7,500 reads from three accessions
+with known genome sizes was divided five ways on three seeds each, from the split the old rule
+produces through to eight target reads per query read. Taking the median of the three seeds, the old
+rule landed at 0.010x, 0.156x and 0.209x of the true size on the three accessions, and the requested
+2:1 at 0.081x, 0.268x and 0.247x. Those medians rise with the target's share at every step on all
+three accessions. Seven of the nine individual seed series do the same throughout; the two that do
+not each dip once and by little, 0.209x to 0.200x on SRR26715166 seed 42 and 0.385x to 0.361x on
+DRR213976 seed 4556. From 1:1 onward the reported interval also narrows against the estimate, on
+SRR12247681 from 90 times the estimate down to 1.9 times, so the higher estimates are the better
+determined ones as well; the one step it widens on is the first, out of the old rule's split.
+
+Splitting further toward the target than the request asked for helped further still on those three
+accessions, all of which sit deep in the regime where the estimator is already failing. A wider
+sweep has since put a boundary on that: 27 accessions with known genome sizes, three pool sizes and
+both normalization modes, 2,328 runs in `paper/corrections/issue63_split_calibration.tsv`.
+
+The split only matters when the pool is far below the request. With normalization on and a pool of
+about 7,500 reads, the spread across splits is three times the spread across seeds, and pushing from
+the requested 2:1 to 4:1 lands nearer the truth on 19 of the 27. At a pool of about 15,000, and on
+the whole input, that spread falls to between one and two times the seed spread and the same
+comparison comes out 13 of 23 and 11 of 23. Asking for 20,000 target reads against 5,000 query,
+rather than dividing 15,000 differently, moves the median estimate by 0.002.
+
+So the defaults stay where they are, and the shortfall rule keeps the ratio it was asked for rather
+than leaning past it. What is left to gain is under half the seed-to-seed spread, it peaks at 4:1
+and falls back at 8:1, and taking it would mean overriding an explicit `-Q`. Expected overlaps per
+query read, the quantity the estimator depends on, does not predict where the split matters either:
+its correlation with the gain from rebalancing is 0.28 where the pool is starved and under 0.13
+everywhere else, so a floor on it would not be a better rule than a ratio.
+
+Two limits on that. These accessions were collected for
+[issue #29](https://github.com/mbhall88/lrge/issues/29) because they estimate badly, so they are not
+a sample of ordinary inputs and the figures above are only meant as comparisons between splits
+within one accession. They also span 2.2 Mbp to 11.1 Mbp and are all bacterial, while the read
+counts in [the paper][doi] move from 2:1 for bacteria to 20:1 for *H. sapiens*, so none of this says
+the split can be ignored at eukaryotic genome sizes.
+
+Across the 17 benchmark accessions the change reaches only `SRR26715166`, the one input that cannot
+supply 15,000 reads. Its estimate moves from 0.828x to 0.912x of the true size under
+`--normalize auto`, and from 0.215x to 0.247x under `--normalize never`. Over 20 seeds the new rule
+is nearer the truth on 19 and 16 of them respectively. The other 16 accessions reproduce to the base
+pair. The estimate the paper reports for `SRR26715166` is therefore out of date, and #36's rerun is
+what will replace it.
+
+Pass `--shortfall target` to take the whole shortfall from the target set as before. Sizing the sets
+by number with `-T` and `-Q` is the more direct way to ask for a particular split, since the ratio
+is preserved whatever it is: a deliberately query-heavy request stays query-heavy. An input with
+fewer reads than the query request alone used to be an error, so LRGE refused to run on any input of
+5,000 reads or fewer at the defaults; it is now divided like any other.
 
 ### All-vs-all strategy
 

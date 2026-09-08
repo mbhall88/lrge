@@ -11,8 +11,7 @@
 //! You probably want to use the [`Builder`] interface to customise the strategy.
 //!
 //! ```no_run
-//! use liblrge::{Estimate, TwoSetStrategy};
-//! use liblrge::estimate::{LOWER_QUANTILE, UPPER_QUANTILE};
+//! use liblrge::{Estimate, Platform, TwoSetStrategy};
 //! use liblrge::twoset::{Builder, DEFAULT_TARGET_NUM_READS, DEFAULT_QUERY_NUM_READS};
 //!
 //! let input = "path/to/reads.fastq";
@@ -24,9 +23,9 @@
 //!    .build(input);
 //!
 //! let finite = true;  // estimate the genome size based on the finite estimates (recommended)
-//! let low_q = Some(LOWER_QUANTILE);   // lower quantile for the confidence interval
-//! let upper_q = Some(UPPER_QUANTILE); // upper quantile for the confidence interval
-//! let est_result = strategy.estimate(finite, low_q, upper_q).expect("Failed to generate estimate");
+//! // the interval quantiles fitted for the platform the reads came from
+//! let (low_q, upper_q) = Platform::Nanopore.interval_quantiles();
+//! let est_result = strategy.estimate(finite, Some(low_q), Some(upper_q)).expect("Failed to generate estimate");
 //! let estimate = est_result.estimate;
 //!
 //! let no_mapping_count = est_result.no_mapping_count;
@@ -365,11 +364,18 @@ impl TwoSetStrategy {
                         overlap_threshold,
                     );
 
-                    trace!(
-                        "Estimate for {}: {}",
-                        String::from_utf8_lossy(qname.as_bytes()),
-                        est
-                    );
+                    let name = String::from_utf8_lossy(qname.as_bytes());
+                    match self.internal_filter {
+                        // Nothing to decide: the estimate is the one counting every overlap.
+                        None => trace!("Estimate for {name}: {unfiltered_est}"),
+                        // Whether a run that asked for the filter engages it is decided once the
+                        // whole pass has been measured, which has not happened yet, so give both
+                        // numbers rather than guess which one the estimate will come from.
+                        Some(_) if est != unfiltered_est => trace!(
+                            "Estimate for {name}: {unfiltered_est} (excluding internal matches: {est})"
+                        ),
+                        Some(_) => trace!("Estimate for {name}: {unfiltered_est}"),
+                    }
 
                     {
                         // Lock the estimates vector and push the estimate
@@ -653,6 +659,7 @@ impl Estimate for TwoSetStrategy {
             Platform::PacBio => Preset::AvaPb,
             Platform::Nanopore => Preset::AvaOnt,
         };
+        debug!("Overlapping reads with the {} preset", preset.name());
 
         if self.use_min_ref && self.target_num_bases > self.query_num_bases {
             // align target to query

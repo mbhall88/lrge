@@ -8,8 +8,7 @@
 //! You probably want to use the [`Builder`] interface to customise the strategy.
 //!
 //! ```no_run
-//! use liblrge::{Estimate, AvaStrategy};
-//! use liblrge::estimate::{LOWER_QUANTILE, UPPER_QUANTILE};
+//! use liblrge::{Estimate, Platform, AvaStrategy};
 //! use liblrge::ava::{Builder, DEFAULT_AVA_NUM_READS};
 //!
 //! let input = "path/to/reads.fastq";
@@ -20,9 +19,9 @@
 //!    .build(input);
 //!
 //! let finite = true;  // estimate the genome size based on the finite estimates (recommended)
-//! let low_q = Some(LOWER_QUANTILE);   // lower quantile for the confidence interval
-//! let upper_q = Some(UPPER_QUANTILE); // upper quantile for the confidence interval
-//! let est_result = strategy.estimate(finite, low_q, upper_q).expect("Failed to generate estimate");
+//! // the interval quantiles fitted for the platform the reads came from
+//! let (low_q, upper_q) = Platform::Nanopore.interval_quantiles();
+//! let est_result = strategy.estimate(finite, Some(low_q), Some(upper_q)).expect("Failed to generate estimate");
 //! let estimate = est_result.estimate;
 //!
 //! let no_mapping_count = est_result.no_mapping_count;
@@ -421,6 +420,7 @@ impl Estimate for AvaStrategy {
             Platform::PacBio => Preset::AvaPb,
             Platform::Nanopore => Preset::AvaOnt,
         };
+        debug!("Overlapping reads with the {} preset", preset.name());
 
         let aligner = AlignerWrapper::new(&reads_file, self.threads, preset, false)?;
 
