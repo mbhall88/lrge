@@ -233,24 +233,23 @@ verify_checksum() {
   fi
 
   info "Verifying checksum…"
+  # The checksum file names the published asset, but the archive was downloaded
+  # to a temporary file, so `sha256sum -c` cannot find the name it is given.
+  # Compare the hashes directly instead.
+  expected_hash=$(awk '{print $1}' "$checksum_file")
   if has sha256sum; then
-    (cd "$(dirname "$archive")" && sha256sum -c "$checksum_file") >/dev/null 2>&1
+    actual_hash=$(sha256sum "$archive" | awk '{print $1}')
   elif has shasum; then
-    (cd "$(dirname "$archive")" && shasum -a 256 -c "$checksum_file") >/dev/null 2>&1
+    actual_hash=$(shasum -a 256 "$archive" | awk '{print $1}')
   elif has openssl; then
-    expected_hash=$(awk '{print $1}' "$checksum_file")
     actual_hash=$(openssl dgst -sha256 "$archive" | awk '{print $NF}')
-    if [ "$expected_hash" != "$actual_hash" ]; then
-      error "Checksum verification failed!"
-      exit 1
-    fi
   else
     warn "No checksum verification tool found. Skipping verification."
     rm -f "$checksum_file"
     return 0
   fi
 
-  if [ $? -ne 0 ]; then
+  if [ "$expected_hash" != "$actual_hash" ]; then
     error "Checksum verification failed! The downloaded file may be corrupted or tampered with."
     rm -f "$checksum_file"
     exit 1
