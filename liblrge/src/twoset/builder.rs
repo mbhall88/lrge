@@ -112,7 +112,7 @@ impl Builder {
     /// Set option for removing the overlaps representing internal matches, and the maximum
     /// ratio of overhang to alignment length above which a mapping counts as one.
     #[deprecated(
-        since = "0.4.0",
+        since = "1.0.0",
         note = "use `internal_filter`, which takes the share of a run's overlaps that internal \
                 matches have to exceed rather than a flag. `remove_internal(true, ratio)` is \
                 `internal_filter(Some(0.0), ratio)`, and `remove_internal(false, ratio)` is \
