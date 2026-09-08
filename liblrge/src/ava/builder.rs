@@ -80,6 +80,21 @@ impl Builder {
         self
     }
 
+    /// Set option for removing the overlaps representing internal matches, and the maximum
+    /// ratio of overhang to alignment length above which a mapping counts as one.
+    #[deprecated(
+        since = "0.4.0",
+        note = "use `internal_filter`, which takes the share of a run's overlaps that internal \
+                matches have to exceed rather than a flag. `remove_internal(true, ratio)` is \
+                `internal_filter(Some(0.0), ratio)`, and `remove_internal(false, ratio)` is \
+                `internal_filter(None, ratio)`."
+    )]
+    pub fn remove_internal(self, filter_contained: bool, ratio: f32) -> Self {
+        // Excluding every internal match is a threshold of zero: any run holding one at all has a
+        // share above it, and a run holding none has nothing the filter could have taken.
+        self.internal_filter(filter_contained.then_some(0.0), ratio)
+    }
+
     /// Set the temporary directory for the strategy. By default, this is the value of the `TMPDIR`
     /// environment variable.
     ///
@@ -222,6 +237,22 @@ mod tests {
             assert_eq!(strategy.internal_filter, threshold);
             assert_eq!(strategy.max_overhang_ratio, 0.05);
         }
+    }
+
+    /// The old flag is kept so a caller has a release to migrate in, and it has to mean what it
+    /// meant: excluding every internal match, which is a threshold of zero.
+    #[test]
+    #[allow(deprecated)]
+    fn remove_internal_still_maps_onto_a_threshold() {
+        let on = Builder::new().remove_internal(true, 0.05).build("reads.fq");
+        let off = Builder::new()
+            .remove_internal(false, 0.05)
+            .build("reads.fq");
+
+        assert_eq!(on.internal_filter, Some(0.0));
+        assert_eq!(on.max_overhang_ratio, 0.05);
+        assert_eq!(off.internal_filter, None);
+        assert_eq!(off.max_overhang_ratio, 0.05);
     }
 
     #[test]
