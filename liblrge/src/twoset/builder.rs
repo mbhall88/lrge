@@ -11,7 +11,7 @@ pub struct Builder {
     target_num_bases: usize,
     query_num_reads: usize,
     query_num_bases: usize,
-    remove_internal: bool,
+    internal_filter: Option<f64>,
     max_overhang_ratio: f32,
     use_min_ref: bool,
     tmpdir: PathBuf,
@@ -31,7 +31,7 @@ impl Default for Builder {
             target_num_bases: 0,
             query_num_reads: DEFAULT_QUERY_NUM_READS,
             query_num_bases: 0,
-            remove_internal: false,
+            internal_filter: None,
             max_overhang_ratio: DEFAULT_MAX_OVERHANG_RATIO,
             use_min_ref: false,
             tmpdir,
@@ -93,15 +93,35 @@ impl Builder {
         self
     }
 
-    /// Set option for removing the overlaps representing internal matches, and the maximum
-    /// ratio of overhang to alignment length above which a mapping counts as one.
+    /// Set the share of a run's overlaps that has to be internal matches before they are excluded,
+    /// and the maximum ratio of overhang to alignment length above which a mapping counts as one.
     ///
-    /// The ratio is stored whether or not the filter is enabled, so it survives being set
-    /// before the filter is turned on.
-    pub fn remove_internal(mut self, filter_contained: bool, ratio: f32) -> Self {
-        self.remove_internal = filter_contained;
+    /// `None` keeps every overlap, which is the default. `Some(0.0)` excludes whatever internal
+    /// matches the run finds. In between, the run measures its own share during the overlap pass
+    /// and excludes them only if it clears the threshold; see
+    /// [`DEFAULT_INTERNAL_MATCH_THRESHOLD`][crate::DEFAULT_INTERNAL_MATCH_THRESHOLD] for what the
+    /// benchmark says about choosing one.
+    ///
+    /// The ratio is stored either way, so it survives being set before the filter is turned on.
+    pub fn internal_filter(mut self, threshold: Option<f64>, ratio: f32) -> Self {
+        self.internal_filter = threshold;
         self.max_overhang_ratio = ratio;
         self
+    }
+
+    /// Set option for removing the overlaps representing internal matches, and the maximum
+    /// ratio of overhang to alignment length above which a mapping counts as one.
+    #[deprecated(
+        since = "0.4.0",
+        note = "use `internal_filter`, which takes the share of a run's overlaps that internal \
+                matches have to exceed rather than a flag. `remove_internal(true, ratio)` is \
+                `internal_filter(Some(0.0), ratio)`, and `remove_internal(false, ratio)` is \
+                `internal_filter(None, ratio)`."
+    )]
+    pub fn remove_internal(self, filter_contained: bool, ratio: f32) -> Self {
+        // Excluding every internal match is a threshold of zero: any run holding one at all has a
+        // share above it, and a run holding none has nothing the filter could have taken.
+        self.internal_filter(filter_contained.then_some(0.0), ratio)
     }
 
     /// Set option for using the smaller Q/T dataset as minimap2 reference
@@ -223,7 +243,7 @@ impl Builder {
             target_num_bases: self.target_num_bases,
             query_num_reads: self.query_num_reads,
             query_num_bases: self.query_num_bases,
-            remove_internal: self.remove_internal,
+            internal_filter: self.internal_filter,
             max_overhang_ratio: self.max_overhang_ratio,
             use_min_ref: self.use_min_ref,
             tmpdir: self.tmpdir,
@@ -240,32 +260,56 @@ impl Builder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DEFAULT_INTERNAL_MATCH_THRESHOLD;
 
     #[test]
-    fn remove_internal_keeps_the_ratio_when_the_filter_is_off() {
+    fn internal_filter_keeps_the_ratio_when_the_filter_is_off() {
         // the ratio is an independent setting - storing it only when the filter is enabled
         // silently discards a caller's choice
-        let strategy = Builder::new()
+        let strategy = Builder::new().internal_filter(None, 0.05).build("reads.fq");
+
+        assert_eq!(strategy.internal_filter, None);
+        assert_eq!(strategy.max_overhang_ratio, 0.05);
+    }
+
+    #[test]
+    fn internal_filter_keeps_the_ratio_at_every_threshold() {
+        for threshold in [
+            None,
+            Some(0.0),
+            Some(0.5),
+            Some(DEFAULT_INTERNAL_MATCH_THRESHOLD),
+        ] {
+            let strategy = Builder::new()
+                .internal_filter(threshold, 0.05)
+                .build("reads.fq");
+
+            assert_eq!(strategy.internal_filter, threshold);
+            assert_eq!(strategy.max_overhang_ratio, 0.05);
+        }
+    }
+
+    /// The old flag is kept so a caller has a release to migrate in, and it has to mean what it
+    /// meant: excluding every internal match, which is a threshold of zero.
+    #[test]
+    #[allow(deprecated)]
+    fn remove_internal_still_maps_onto_a_threshold() {
+        let on = Builder::new().remove_internal(true, 0.05).build("reads.fq");
+        let off = Builder::new()
             .remove_internal(false, 0.05)
             .build("reads.fq");
 
-        assert!(!strategy.remove_internal);
-        assert_eq!(strategy.max_overhang_ratio, 0.05);
+        assert_eq!(on.internal_filter, Some(0.0));
+        assert_eq!(on.max_overhang_ratio, 0.05);
+        assert_eq!(off.internal_filter, None);
+        assert_eq!(off.max_overhang_ratio, 0.05);
     }
 
     #[test]
-    fn remove_internal_keeps_the_ratio_when_the_filter_is_on() {
-        let strategy = Builder::new().remove_internal(true, 0.05).build("reads.fq");
-
-        assert!(strategy.remove_internal);
-        assert_eq!(strategy.max_overhang_ratio, 0.05);
-    }
-
-    #[test]
-    fn remove_internal_defaults_to_off_with_the_default_ratio() {
+    fn internal_filter_defaults_to_off_with_the_default_ratio() {
         let strategy = Builder::new().build("reads.fq");
 
-        assert!(!strategy.remove_internal);
+        assert_eq!(strategy.internal_filter, None);
         assert_eq!(strategy.max_overhang_ratio, DEFAULT_MAX_OVERHANG_RATIO);
     }
 }
