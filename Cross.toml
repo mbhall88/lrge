@@ -19,3 +19,6 @@ pre-build = [
 pre-build = [
     "brew install zlib",
 ]
+
+[build.env]
+passthrough = ["LIBZ_SYS_STATIC"]
