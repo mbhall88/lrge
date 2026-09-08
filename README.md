@@ -441,10 +441,22 @@ the right-hand column carry the numbers.
 | `--shortfall` | An input too small to fill both read sets used to take the whole shortfall out of the target set, inverting the requested ratio. It is now divided in the ratio asked for. | [Two-set strategy](#two-set-strategy) |
 | `--max-read-buffer` | Normalizing a large request on long reads could need more memory than the machine had. That buffer is now capped, with a second pass over the input as the fallback. | [Uneven read depth](#uneven-read-depth) |
 
+Over the same 3,370 read sets the median absolute relative error falls from 7.1% to 6.4%, and the
+runs landing within 10% of the truth rise from 58.6% to 62.9%. That splits cleanly by platform, and
+by cause. On PacBio the median falls from 27.2% to 16.1% and the runs within 10% rise from 13.3% to
+26.2%, all of it the `-P` fix: normalizing leaves the PacBio median at 27.2% while the preset is
+still wrong. On nanopore the median falls from 4.84% to 4.77% and the runs within 10% rise from
+75.1% to 76.4%, all of it normalization, which by design engages only on the inputs it finds skew
+in.
+
+![LRGE 0.3.0 against 1.0.0 on the same read sets](./paper/corrections/figures/version_absolute_relative_error.png)
+
 The full working, including what was measured and rejected, is in
 [`paper/corrections/`](./paper/corrections/): the depth-normalization constants and the `-F` share in
 [`README_issue36.md`](./paper/corrections/README_issue36.md), the interval quantiles and the `-P` fix
-in [`README_issue38.md`](./paper/corrections/README_issue38.md). The release notes are in
+in [`README_issue38.md`](./paper/corrections/README_issue38.md), and how the figures below were
+redrawn on the same benchmark in
+[`README_v1_results.md`](./paper/corrections/README_v1_results.md). The release notes are in
 [`CHANGELOG.md`](./CHANGELOG.md).
 
 
@@ -698,18 +710,38 @@ we did not find the difference to be statistically significant in our tests.
 
 ## Results
 
-> [!NOTE]
-> The figures in this section and the next are the [paper][doi]'s, produced with the estimator as it
-> was at publication. They are not a measurement of v1.0.0, which changes the estimate on some
-> inputs; see [What changed since the paper](#what-changed-since-the-paper).
-
 We compared LRGE to three other methods: GenomeScope2, Mash, and Raven ([see below](#alternatives) for more info). We ran 
 each method on 3370 read sets from PacBio or ONT data. Each of these samples is associated with a RefSeq assembly, so the 
 true size was taken as the size of the RefSeq assembly. You can find the metadata for the samples [here](./paper/config/bacteria_lr_runs.filtered.tsv).
 
+> [!NOTE]
+> These figures are redrawn for v1.0.0 on the same 3,370 read sets. The LRGE column is v1.0.0; the
+> other three methods are the [paper][doi]'s own numbers, unchanged. The published figures, which
+> also carry the all-vs-all strategy, are in the paper itself and in this repository at the
+> [`lrge-0.3.0`](https://github.com/mbhall88/lrge/blob/lrge-0.3.0/README.md#results) tag.
+>
+> LRGE's read sets were rebuilt from ENA for these runs rather than kept from the paper's. That does
+> not move anything: 0.3.0 on the rebuilt reads reproduces the paper's own two-set figures, at a
+> median absolute relative error of 4.84% against 4.84% on nanopore and 27.2% against 27.1% on
+> PacBio. Per-accession estimates are in
+> [`v1_estimates.tsv`](./paper/corrections/v1_estimates.tsv) and the summary in
+> [`v1_method_accuracy.tsv`](./paper/corrections/v1_method_accuracy.tsv).
+
 The full results are available in the [paper][doi] and [here](./paper/results/estimates/estimates.tsv). Here is a brief summary of how LRGE compares to other methods.
 
-![Results](./paper/results/figures/method_absolute_relative_error.png)
+![Results](./paper/corrections/figures/method_absolute_relative_error.png)
+
+| | median absolute relative error | within 10% of the truth |
+|---|---|---|
+| LRGE, nanopore | 4.8% | 76.4% |
+| LRGE, PacBio | 16.1% | 26.2% |
+| GenomeScope2 | 8.5% / 5.8% | 57.6% / 62.9% |
+| Mash | 24.0% / 15.1% | 32.5% / 41.9% |
+| Raven | 1.1% / 2.6% | 96.4% / 97.6% |
+
+Where two numbers are given they are nanopore and PacBio. Raven assembles the reads, which is both
+why it is the most accurate here and why it is far and away the most expensive; see
+[Benchmark](#benchmark).
 
 This compares the absolute relative error as a percentage. The relative error ($\epsilon_{\text{rel}}$) is calculated as:
 
@@ -724,12 +756,19 @@ would be 1.5 Mbp or 0.5 Mbp.
 The following figure shows the (non-absolute) relative error for the same methods to give an 
 indication of which methods tend to over or underestimate.
 
-![Results](./paper/results/figures/platform_relative_error.png)
+![Results](./paper/corrections/figures/platform_relative_error.png)
 
 
 ## Benchmark
 
 For the full details of the methods benchmarked, see the [paper][doi]. However, here is a brief summary of the results.
+
+> [!NOTE]
+> This figure is the [paper][doi]'s and has not been redrawn for v1.0.0. Time and memory are
+> properties of the machine as much as the tool, and the v1.0.0 runs were made on different
+> hardware, so putting them beside the paper's measurements of the other three methods would compare
+> the clusters rather than the methods. What v1.0.0 costs against v0.3.0, measured on one machine, is
+> in [Uneven read depth](#uneven-read-depth).
 
 ![Benchmark](./paper/results/figures/method_cpu_memory.png)
 
