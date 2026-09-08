@@ -23,6 +23,9 @@ jobs:
         job:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, use-cross: true }
           - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, use-cross: true }
+          # install.sh asks for the musl builds on every Linux host, so they have to exist
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, use-cross: true, libz-static: "1" }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, use-cross: true, libz-static: "1" }
           - { os: macos-13, target: x86_64-apple-darwin, use-cross: true }  # we use macos-13 to avoid the new Apple silicon chips on the latest runners which cause issues with zlib
           - { os: macos-latest, target: aarch64-apple-darwin, use-cross: true }
     steps:
@@ -58,6 +61,9 @@ jobs:
           tool: cross
 
       - name: Build with cross
+        # The musl images have no zlib to link against, so libz-sys builds its own.
+        env:
+          LIBZ_SYS_STATIC: ${{ matrix.job.libz-static }}
         run: cross build --release --target=${{ matrix.job.target }}
 
       - name: Set binary name & path
@@ -131,5 +137,8 @@ jobs:
             ${{ steps.package.outputs.PKG_PATH }}
             ${{ steps.package.outputs.SHA_PATH }}
             install/install.sh
+          # release-please cuts a release per crate, and without this the liblrge one wins the
+          # `latest` pointer. install.sh reads that pointer for both the script and the version.
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
