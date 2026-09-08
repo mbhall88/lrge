@@ -16,6 +16,7 @@ on top of the [`liblrge`][liblrge] Rust library, which is also available as a st
 
 - [Installation](#installation)
 - [Usage](#usage)
+- [What changed since the paper](#what-changed-since-the-paper)
 - [Method](#method)
 - [Results](#results)
 - [Benchmark](#benchmark)
@@ -47,7 +48,7 @@ wget -nv -O - https://github.com/mbhall88/lrge/releases/latest/download/install.
 You can also pass options to the script like so
 
 ```
-$ curl -sSL lrge.mbh.sh | sh -s -- --help
+$ curl -sSL https://github.com/mbhall88/lrge/releases/latest/download/install.sh | sh -s -- --help
 install.sh [option]
 
 Fetch and install the latest version of lrge, if lrge is already
@@ -56,6 +57,9 @@ installed it will be updated to the latest version.
 Options
         -V, --verbose
                 Enable verbose output for the installer
+
+        -d, --dry-run
+                Display the actions that would be taken without performing them
 
         -f, -y, --force, --yes
                 Skip the confirmation prompt during installation
@@ -112,7 +116,7 @@ The above will use the latest version. If you want to specify a version then use
 [tag][ghcr] like so.
 
 ```shell
-$ VERSION="0.2.1"
+$ VERSION="1.0.0"
 $ URI="docker://ghcr.io/mbhall88/lrge:${VERSION}"
 ```
 
@@ -150,19 +154,19 @@ Estimate the genome size of a set of *Mycobacterium tuberculosis* ONT [reads](ht
 ```
 $ wget -O reads.fq.gz "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR283/049/SRR28370649/SRR28370649_1.fastq.gz"
 $ lrge -t 8 reads.fq.gz
-[2024-11-22T03:49:53Z INFO  lrge] Running two-set strategy with 10000 target reads and 5000 query reads
-[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.44 Mbp (95% CI: 3.48 Mbp - 4.95 Mbp)
+[2026-09-08T02:06:13Z INFO  lrge] Running two-set strategy with 10000 target reads and 5000 query reads
+[2026-09-08T02:06:28Z INFO  lrge] Estimated genome size: 4.44 Mbp (95% CI: 3.48 Mbp - 4.95 Mbp)
 4437120
-[2024-11-22T03:50:10Z INFO  lrge] Done!
+[2026-09-08T02:06:28Z INFO  lrge] Done!
 ```
 
 The size estimate is printed to stdout, but you can also save it to a file with the `-o` flag.
 
 ```
 $ lrge -t 8 reads.fq.gz -o size.txt
-[2024-11-22T03:49:53Z INFO  lrge] Running two-set strategy with 10000 target reads and 5000 query reads
-[2024-11-22T03:50:10Z INFO  lrge] Estimated genome size: 4.44 Mbp (95% CI: 3.48 Mbp - 4.95 Mbp)
-[2024-11-22T03:50:10Z INFO  lrge] Done!
+[2026-09-08T02:06:13Z INFO  lrge] Running two-set strategy with 10000 target reads and 5000 query reads
+[2026-09-08T02:06:28Z INFO  lrge] Estimated genome size: 4.44 Mbp (95% CI: 3.48 Mbp - 4.95 Mbp)
+[2026-09-08T02:06:28Z INFO  lrge] Done!
 $ cat size.txt
 4437120
 ```
@@ -170,18 +174,18 @@ $ cat size.txt
 By default, LRGE uses the [two-set strategy](#two-set-strategy) with 10,000 target reads (`-T`) and 5,000 query reads 
 (`-Q`). You can use the [all-vs-all strategy](#all-vs-all-strategy) by specifying the number of reads to use with the `-n` flag.
 
-In [the paper][doi], we ran LRGE on three eukaoryotic genomes: *Arabidopsis thaliana* (125 Mbp), *Drosophila melanogaster* 
+In [the paper][doi], we ran LRGE on three eukaryotic genomes: *Arabidopsis thaliana* (125 Mbp), *Drosophila melanogaster* 
 (143 Mbp), and *Saccharomyces cerevisiae* (12 Mbp). We used 50,000 query and 100,000 target reads for *A. thaliana* and 
-*D. melanogaster*, and 10,000 query and 20,000 target reads for *S. cerevisiae*. For *H. sapiens* we used 100,000 query and 2,000,000 targets reads.
-As genome size increases, more reads are needed to obtain sufficient overlaps for accurate estimation. While there’s no strict rule, 
+*D. melanogaster*, and 10,000 query and 20,000 target reads for *S. cerevisiae*. For *H. sapiens* we used 100,000 query and 2,000,000 target reads.
+As genome size increases, more reads are needed to obtain sufficient overlaps for accurate estimation. While there's no strict rule, 
 we scaled the number of reads by the approximate order of magnitude difference between bacterial and eukaryotic genomes. 
-LRGE’s defaults are calibrated for bacteria, so multiplying these by the expected genome size ratio is a good starting point. 
+LRGE's defaults are calibrated for bacteria, so multiplying these by the expected genome size ratio is a good starting point. 
 
 
 ### Library
 
 You can also use the `liblrge` library in your Rust projects. This allows you to estimate genome size within your own 
-applications - without needing to call out to `lrge`. For more details on how to use the library, see the [documentation](https://www.docs.rs/liblrge) or the 
+applications - without needing to call out to `lrge`. For more details on how to use the library, see the [documentation](https://docs.rs/liblrge) or the 
 [source code](./liblrge).
 
 ### Standard options
@@ -216,13 +220,34 @@ Options:
 
 ### Full usage
 
-Estimate genome size of PacBio reads
+Estimate genome size of PacBio reads. `-P` picks the minimap2 overlap preset and the interval
+quantiles, so it is worth setting
 
 ```
 $ lrge -P pb -t 8 reads.fq
 ```
 
-Don't remove the intermidiate read and overlap files
+Normalization runs when LRGE detects uneven read depth. Force it on or off with `--normalize`, and
+see [Uneven read depth](#uneven-read-depth) for what it does
+
+```
+$ lrge --normalize never reads.fq
+```
+
+Cap the memory normalization spends buffering the reads it selects
+
+```
+$ lrge --max-read-buffer 512M reads.fq
+```
+
+An input too small to fill both read sets is divided between them in the ratio `-T` and `-Q` asked
+for. To take the whole shortfall out of the target set, as versions up to v0.3.0 did
+
+```
+$ lrge --shortfall target reads.fq
+```
+
+Don't remove the intermediate read and overlap files
 
 ```
 $ lrge -C reads.fq
@@ -253,18 +278,14 @@ If you don't want the estimate to be rounded to the nearest integer 🤓
 $ lrge --float-my-boat reads.fq
 ```
 
-The interval printed beside the estimate is a pair of percentiles of the per-read estimates, and
-which pair depends on `-P`, because the true size sits in a different part of that spread on each
-platform. Nanopore reads get the 20.5th and 63.5th percentiles and PacBio reads the 1st and
-61.5th, each the narrowest pair covering the truth on 95% of that platform's runs in [the
-paper][doi]'s benchmark. You can use any pair you like
+The interval printed beside the estimate is a pair of percentiles of the per-read estimates, picked
+per platform so that it covers the true size on 95% of the benchmark runs of that platform, and
+labelled `95% CI` when it is that pair. See [The reported interval](#the-reported-interval). You can
+use any pair you like, and a run given one names it in the output instead
 
 ```
 $ lrge --q1 0.25 --q3 0.75 reads.fq
 ```
-
-A run given a pair of its own names it in the output rather than calling it a 95% interval, because
-what such a pair covers has not been measured.
 
 If you want to see the estimate for each read, turn on trace level logging
 
@@ -400,9 +421,40 @@ Options:
 ```
 
 
+## What changed since the paper
+
+The [paper][doi] describes LRGE as it was before the 0.2 series, and the 0.3.x releases behave close
+enough to it to reproduce its numbers: the paper's own per-accession two-set estimates and a 0.3.0
+rerun of the same 3,370 read sets agree to a median of 0.75%. v1.0.0 does not. It changes the
+estimate on some inputs and the reported interval on all of them, so its results are not comparable
+with earlier versions. **Pin the 0.3.x series to reproduce the published results.**
+
+Each change below was fitted or checked on the paper's own benchmark, and the sections linked from
+the right-hand column carry the numbers.
+
+| | what changed | where |
+|---|---|---|
+| `--normalize` | An input whose reads come mostly from one high-copy sequence used to collapse the estimate towards the size of that sequence. LRGE now detects depth skew and normalizes the read selection against it, by default. | [Uneven read depth](#uneven-read-depth) |
+| `-F` | Overlaps that are really two reads sharing a repeat used to be either always dropped or never dropped. They are now measured on every run and dropped only above a share you set. | [Repeat-driven overlaps](#repeat-driven-overlaps) |
+| `--q1`, `--q3` | The reported interval used to be one pair of percentiles for both platforms, covering 87% of the benchmark. It is now fitted per platform to cover 95%, and the nanopore interval is 18% narrower. | [The reported interval](#the-reported-interval) |
+| `-P` | The flag was parsed and then ignored, so PacBio reads were overlapped with the nanopore preset. It now selects the preset, which moves the median PacBio estimate from 1.27 to 1.16 times the true size. | [The reported interval](#the-reported-interval) |
+| `--shortfall` | An input too small to fill both read sets used to take the whole shortfall out of the target set, inverting the requested ratio. It is now divided in the ratio asked for. | [Two-set strategy](#two-set-strategy) |
+| `--max-read-buffer` | Normalizing a large request on long reads could need more memory than the machine had. That buffer is now capped, with a second pass over the input as the fallback. | [Uneven read depth](#uneven-read-depth) |
+
+The full working, including what was measured and rejected, is in
+[`paper/corrections/`](./paper/corrections/): the depth-normalization constants and the `-F` share in
+[`README_issue36.md`](./paper/corrections/README_issue36.md), the interval quantiles and the `-P` fix
+in [`README_issue38.md`](./paper/corrections/README_issue38.md). The release notes are in
+[`CHANGELOG.md`](./CHANGELOG.md).
+
+
 ## Method
 
-For a full description of the method, see the [paper][doi].
+The estimator itself is the [paper][doi]'s, and [Two-set strategy](#two-set-strategy) and
+[All-vs-all strategy](#all-vs-all-strategy) below describe it. The three sections before them are
+behaviour added after publication: what LRGE does about uneven read depth, about overlaps that come
+from repeats, and how it picks the interval it prints beside the estimate.
+[What changed since the paper](#what-changed-since-the-paper) is the short version of all three.
 
 ### Uneven read depth
 
@@ -525,6 +577,42 @@ measurements are in
 `--max-overhang-ratio` sets how much overhang makes a single alignment an internal match, where the
 share given to `-F` sets how many of them a run has to have before they are dropped.
 
+### The reported interval
+
+The number beside the estimate is the median of the per-read estimates, and the interval either side
+of it is two percentiles of the same spread. What that interval covers depends on where the true
+size tends to sit among those per-read estimates, and that differs by platform: over the paper's
+benchmark the true size sits at the 46th percentile of a median nanopore run's estimates and at the
+29th of a median PacBio one.
+
+The paper fitted one pair for both platforms, the 15th and 65th percentiles, and reported about 92%
+coverage. Measured on the same benchmark now it covers 87.2%, which is 97.0% on nanopore and 60.2%
+on PacBio. So there are now two pairs, each the narrowest that covers 95% of its own platform's runs:
+
+| | pair | coverage | median width |
+|---|---|---|---|
+| nanopore | 20.5th and 63.5th | 95.2% over 2,468 runs | 0.35 |
+| PacBio | 1st and 61.5th | 95.0% over 902 runs | 0.85 |
+
+Widths are multiples of the true genome size, so the nanopore interval is 18% narrower than the one
+0.3.0 reports. `--q1` and `--q3` take their defaults from `-P` and can be set to any pair; a run
+given a pair of its own prints it as `q0.25-q0.75` rather than calling it a 95% interval, because an
+arbitrary pair has no measured coverage.
+
+The PacBio interval is the wider of the two because the point estimate still runs high there, at a
+median of 1.16 times the true size against 1.03 for nanopore. Its lower bound is the first
+percentile, which is about forty estimates in at the default read counts but falls between the two
+smallest estimates a run makes at `-Q 100`, so read a small PacBio run's lower bound as the single
+read's estimate it is.
+
+Fitting PacBio at all needed a bug fixed first. Up to and including v0.3.0 the `lrge` binary parsed
+`-P` and never passed it on, so PacBio reads were overlapped with the nanopore preset whatever the
+flag said. Giving them the PacBio preset takes the median estimate from 1.27 to 1.16 times the true
+size, the runs landing within 10% from 13.4% to 26.2%, and the runs over twice the true size from
+10.4% to 4.5%. Library callers setting `Builder::platform` were never affected. The fit, the
+controls and the tables are in
+[`paper/corrections/README_issue38.md`](./paper/corrections/README_issue38.md).
+
 ### Two-set strategy
 
 The two-set strategy is the default method used by LRGE. It involves randomly selecting a two distinct subsets of reads 
@@ -592,8 +680,7 @@ Across the 17 benchmark accessions the change reaches only `SRR26715166`, the on
 supply 15,000 reads. Its estimate moves from 0.828x to 0.912x of the true size under
 `--normalize auto`, and from 0.215x to 0.247x under `--normalize never`. Over 20 seeds the new rule
 is nearer the truth on 19 and 16 of them respectively. The other 16 accessions reproduce to the base
-pair. The estimate the paper reports for `SRR26715166` is therefore out of date, and #36's rerun is
-what will replace it.
+pair. The estimate the paper reports for `SRR26715166` is therefore out of date.
 
 Pass `--shortfall target` to take the whole shortfall from the target set as before. Sizing the sets
 by number with `-T` and `-Q` is the more direct way to ask for a particular split, since the ratio
@@ -610,6 +697,11 @@ This strategy is *generally* more computationally expensive than the two-set str
 we did not find the difference to be statistically significant in our tests.
 
 ## Results
+
+> [!NOTE]
+> The figures in this section and the next are the [paper][doi]'s, produced with the estimator as it
+> was at publication. They are not a measurement of v1.0.0, which changes the estimate on some
+> inputs; see [What changed since the paper](#what-changed-since-the-paper).
 
 We compared LRGE to three other methods: GenomeScope2, Mash, and Raven ([see below](#alternatives) for more info). We ran 
 each method on 3370 read sets from PacBio or ONT data. Each of these samples is associated with a RefSeq assembly, so the 
@@ -686,5 +778,4 @@ If you use LRGE in your research, please cite the following [paper][doi]:
 [docker]: https://docs.docker.com/
 [doi]: https://doi.org/10.1093/bioinformatics/btaf593
 [ghcr]: https://github.com/mbhall88/lrge/pkgs/container/lrge
-[liblrge]: https://www.docs.rs/liblrge
-[quay.io]: https://quay.io/repository/mbhall88/lrge
+[liblrge]: https://docs.rs/liblrge
