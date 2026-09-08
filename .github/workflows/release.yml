@@ -26,7 +26,11 @@ jobs:
           # install.sh asks for the musl builds on every Linux host, so they have to exist
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, use-cross: true, libz-static: "1" }
           - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, use-cross: true, libz-static: "1" }
-          - { os: macos-13, target: x86_64-apple-darwin, use-cross: true }  # we use macos-13 to avoid the new Apple silicon chips on the latest runners which cause issues with zlib
+          # macos-13 was used to get an Intel host, because homebrew's zlib on the Apple
+          # silicon runners is arm64 only. That label no longer schedules, and it is what
+          # timed the 0.3.0 release run out after 24 hours. Building libz from source for the
+          # target removes the reason for wanting an Intel host at all.
+          - { os: macos-latest, target: x86_64-apple-darwin, use-cross: true, libz-static: "1" }
           - { os: macos-latest, target: aarch64-apple-darwin, use-cross: true }
     steps:
       - name: Checkout source code
