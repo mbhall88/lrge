@@ -28,8 +28,14 @@ pub(crate) enum Preset {
 }
 
 impl Preset {
+    /// The preset's minimap2 name, for logging.
+    pub fn name(&self) -> &'static str {
+        let bytes = self.as_bytes();
+        std::str::from_utf8(&bytes[..bytes.len() - 1]).expect("preset names are ASCII")
+    }
+
     /// Get the preset name as a null-terminated byte literal. Intended for use with minimap2's `mm_set_opt` function.
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &'static [u8] {
         match self {
             Preset::MapOnt => b"map-ont\0",
             Preset::MapHifi => b"map-hifi\0",

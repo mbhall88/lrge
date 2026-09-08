@@ -6,6 +6,7 @@ use log::{debug, info, LevelFilter};
 use std::fs::File;
 use std::io;
 use std::io::Write;
+use std::str::FromStr;
 
 mod cli;
 mod utils;
@@ -53,10 +54,16 @@ fn main() -> Result<()> {
         Box::new(File::create(&args.output).context("Failed to create output file")?)
     };
 
+    let platform = liblrge::Platform::from_str(&args.platform)
+        .context("Failed to parse the sequencing platform")?;
+    // Read before the platform is handed to a builder, because that moves it.
+    let fitted_quantiles = platform.interval_quantiles();
+
     let mut strategy: Box<dyn Estimate> = if let Some(num) = args.num_reads {
         info!("Running all-vs-all strategy with {} reads", num);
         let builder = liblrge::ava::Builder::new()
             .num_reads(num)
+            .platform(platform)
             .internal_filter(args.filter_contained, args.max_overhang_ratio)
             .threads(args.threads)
             .tmpdir(tmpdir.path())
@@ -75,6 +82,7 @@ fn main() -> Result<()> {
         let builder = liblrge::twoset::Builder::new()
             .target_num_reads(target_num_reads)
             .query_num_reads(query_num_reads)
+            .platform(platform)
             .internal_filter(args.filter_contained, args.max_overhang_ratio)
             .use_min_ref(args.use_min_ref)
             .threads(args.threads)
@@ -104,7 +112,15 @@ fn main() -> Result<()> {
             if let (Some(low), Some(high)) = (low_q, upper_q) {
                 let formatted_low = format_estimate(low);
                 let formatted_high = format_estimate(high);
-                msg.push_str(&format!(" (IQR: {formatted_low} - {formatted_high})"));
+                // The quantiles fitted for the platform cover the true size on 95% of the paper's
+                // benchmark runs; any other pair covers whatever it covers, so it is named instead
+                // of being given a confidence it was not measured at.
+                let label = if (args.lower_q, args.upper_q) == fitted_quantiles {
+                    "95% CI".to_string()
+                } else {
+                    format!("q{}-q{}", args.lower_q, args.upper_q)
+                };
+                msg.push_str(&format!(" ({label}: {formatted_low} - {formatted_high})"));
             }
             info!("{}", msg);
 

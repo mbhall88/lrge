@@ -300,6 +300,56 @@ pub enum Platform {
     Nanopore,
 }
 
+impl Platform {
+    /// The quantiles of the per-read estimates that bound the reported interval.
+    ///
+    /// The interval is read straight off the estimates a run made from its own reads, so what it
+    /// covers depends on where the true genome size tends to sit in that spread, and that differs
+    /// by platform. Over the paper's benchmark of 3,370 bacterial runs the truth sits at the 46th
+    /// percentile of a median Nanopore run's per-read estimates and at the 29th of a median PacBio
+    /// one.
+    ///
+    /// Each pair is the narrowest that covers the truth on 95% of that platform's runs: 95.2% over
+    /// 2,468 Nanopore runs and 95.0% over 902 PacBio runs. The single pair the paper fitted across
+    /// both platforms, the 15th and 65th percentiles, covers 97.0% of the Nanopore runs and 80.2%
+    /// of the PacBio ones.
+    ///
+    /// The PacBio interval is the wider of the two, spanning 0.85 times the genome on a median run
+    /// against 0.35 for Nanopore. That is what it costs to cover a point estimate that still runs
+    /// high on PacBio, where the median run comes out at 1.16 times its true size and 26% of runs
+    /// land within 10% of it, against 1.03 and 76% for Nanopore. No choice of quantiles fixes that.
+    ///
+    /// The lower PacBio quantile is the first percentile, so a run with few enough query reads has
+    /// little to place it on: at the default read counts it sits about forty estimates in, and at
+    /// `-Q 100` it falls between the two smallest estimates the run made.
+    ///
+    /// The fit is recorded in `paper/corrections/README_issue38.md`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use liblrge::estimate::{NANOPORE_LOWER_QUANTILE, NANOPORE_UPPER_QUANTILE};
+    /// use liblrge::Platform;
+    ///
+    /// let (lower, upper) = Platform::Nanopore.interval_quantiles();
+    ///
+    /// assert_eq!(lower, NANOPORE_LOWER_QUANTILE);
+    /// assert_eq!(upper, NANOPORE_UPPER_QUANTILE);
+    /// ```
+    pub fn interval_quantiles(&self) -> (f32, f32) {
+        match self {
+            Platform::PacBio => (
+                estimate::PACBIO_LOWER_QUANTILE,
+                estimate::PACBIO_UPPER_QUANTILE,
+            ),
+            Platform::Nanopore => (
+                estimate::NANOPORE_LOWER_QUANTILE,
+                estimate::NANOPORE_UPPER_QUANTILE,
+            ),
+        }
+    }
+}
+
 impl FromStr for Platform {
     type Err = error::LrgeError;
 
@@ -469,5 +519,52 @@ mod tests {
     #[should_panic(expected = "Cannot generate")]
     fn test_weighted_random_set_k_greater_than_positive_weights() {
         sample_unique_indices(2, 3, Some(42), Some(&[1.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn each_platform_gets_the_pair_fitted_for_it() {
+        assert_eq!(
+            Platform::Nanopore.interval_quantiles(),
+            (
+                estimate::NANOPORE_LOWER_QUANTILE,
+                estimate::NANOPORE_UPPER_QUANTILE
+            )
+        );
+        assert_eq!(
+            Platform::PacBio.interval_quantiles(),
+            (
+                estimate::PACBIO_LOWER_QUANTILE,
+                estimate::PACBIO_UPPER_QUANTILE
+            )
+        );
+    }
+
+    /// Every pair has to be a pair a quantile calculation will accept: a lower below the median, an
+    /// upper above it, and both inside the unit interval.
+    #[test]
+    fn every_pair_brackets_the_median() {
+        for platform in [Platform::Nanopore, Platform::PacBio] {
+            let (lower, upper) = platform.interval_quantiles();
+
+            assert!(
+                (0.0..0.5).contains(&lower),
+                "{platform:?} lower quantile: {lower}"
+            );
+            assert!(
+                (0.5..=1.0).contains(&upper),
+                "{platform:?} upper quantile: {upper}"
+            );
+        }
+    }
+
+    /// The two pairs are not the same width, and which is wider is the point of splitting them: the
+    /// truth sits at the 20th percentile of a median PacBio run's per-read estimates and the 46th of
+    /// a median Nanopore one, so PacBio needs to reach further down to catch it.
+    #[test]
+    fn the_pacbio_pair_reaches_further_down_than_the_nanopore_one() {
+        let (nanopore_lower, _) = Platform::Nanopore.interval_quantiles();
+        let (pacbio_lower, _) = Platform::PacBio.interval_quantiles();
+
+        assert!(pacbio_lower < nanopore_lower);
     }
 }
